@@ -1,0 +1,43 @@
+# Развёртывание на сервере в сети компании:  cp .env.example .env  (заполнить)  →  docker compose up -d --build
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: lawdesk
+      POSTGRES_USER: lawdesk
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?задайте POSTGRES_PASSWORD в .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lawdesk"]
+      interval: 5s
+      retries: 10
+
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      LAWDESK_DATABASE_URL: postgresql+psycopg://lawdesk:${POSTGRES_PASSWORD}@db:5432/lawdesk
+      LAWDESK_COOKIE_SECURE: "true"
+    volumes:
+      - storage:/data/storage   # локальное хранилище файлов, пока не подключён 1С:Документооборот
+    depends_on:
+      db:
+        condition: service_healthy
+
+  web:
+    build: ./frontend
+    restart: unless-stopped
+    ports:
+      - "443:443"
+      - "80:80"
+    volumes:
+      - ./certs:/etc/nginx/certs:ro
+    depends_on:
+      - backend
+
+volumes:
+  pgdata:
+  storage:

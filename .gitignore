@@ -6,3 +6,6 @@ frontend/dist/
 .env
 storage/
 .pytest_cache/
+certs/*.crt
+certs/*.key
+*.tsbuildinfo

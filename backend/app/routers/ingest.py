@@ -82,7 +82,7 @@ def _upsert_document(db: Session, who: Principal, d: DocumentIn) -> tuple[Docume
         if case is None:
             doc.meta = {**doc.meta, "unresolved_case_ref": d.case.model_dump(exclude_none=True)}
         else:
-            link_document(db, who, doc, case, d.link_method or ("УИД" if d.case.uid else "номер"))
+            link_document(db, who, doc, case, d.link_method or ("УИД" if d.case.uid else "номер" if d.case.case_number else "id"))
     if doc.case_id and (created or {"act_type", "act_date", "motivated_date", "instance"} & fields.keys()):
         case = db.get(Case, doc.case_id)
         db.refresh(case)
