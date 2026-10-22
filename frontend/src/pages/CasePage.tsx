@@ -7,7 +7,7 @@ import CasePath from "../components/CasePath";
 import Chronology from "../components/Chronology";
 import ResolvePanel, { ObservationLine } from "../components/ResolvePanel";
 import { PromptModal, useToast } from "../components/overlay";
-import { DueBadge, ErrorBox, StatusBadge, useLoad } from "../components/ui";
+import { DueBadge, ErrorBox, StatusBadge, clickable, useAction, useLoad } from "../components/ui";
 
 type Tab = "values" | "chronology" | "documents" | "deadlines" | "journal";
 
@@ -30,7 +30,8 @@ export default function CasePage() {
     toast(v.status === "resolved" ? `${v.label}: принято ${fmtValue(v.kind, v.value)}` : `${v.label}: решение отменено`);
   };
 
-  const conflicts = data.values.filter((v) => v.status === "conflict" || v.status === "appeal_possible").length;
+  const conflicts = data.values.filter(disputedV).length;
+  const sums = amounts(data.values);
   const openDl = data.deadlines.filter((d) => d.status === "open").length;
 
   return (
@@ -67,7 +68,7 @@ export default function CasePage() {
           )}
         </div>
       </div>
-      <div className="panel"><AwardBar claimed={amounts(data.values).claimed} awarded={amounts(data.values).awarded} parts={amounts(data.values).parts} /></div>
+      <div className="panel"><AwardBar claimed={sums.claimed} awarded={sums.awarded} parts={sums.parts} /></div>
       </div>
 
       <div className="tabs">
@@ -89,7 +90,7 @@ export default function CasePage() {
             <thead><tr><th>Дата</th><th>Вид акта</th><th>Инстанция</th><th>Тип</th><th>Файл</th><th>Привязка</th></tr></thead>
             <tbody>
               {data.documents.map((d) => (
-                <tr key={d.id} className="clickable" onClick={() => nav(`/documents/${d.id}`)}>
+                <tr key={d.id} className="clickable" {...clickable(() => nav(`/documents/${d.id}`))}>
                   <td className="nowrap">{fmtDate(d.act_date)}</td>
                   <td>{d.act_type || <span className="muted">не определён</span>}</td>
                   <td>{d.instance}</td>
@@ -148,16 +149,15 @@ function ValuesTab({ values, onChange }: { values: CaseValue[]; onChange: (v: Ca
   const groups = [...new Set(values.map((v) => v.group))];
   if (values.length === 0) return <div className="panel empty-state">Источники ещё не прислали значений по этому делу</div>;
   const money = values.filter((v) => v.kind === "money" && v.field !== "claim_total");
-  const disputed = (v: CaseValue) => v.status === "conflict" || v.status === "appeal_possible";
-  const num = (v: CaseValue) => Number(String(v.value ?? "").replace(/[^\d.,-]/g, "").replace(",", "."));
-  const total = money.filter((v) => !disputed(v) && v.value).reduce((a, v) => a + (num(v) || 0), 0);
+  const disputed = disputedV;
+  const total = money.filter((v) => !disputed(v) && v.value).reduce((a, v) => a + (numV(v) || 0), 0);
   const anyDisputed = money.some(disputed);
   return (
     <div className="stack">
       {money.length > 0 && (
         <div className="sums">
           {money.map((v) => (
-            <div key={v.id} className={disputed(v) ? "disputed" : ""} style={{ cursor: "pointer" }} onClick={() => setOpen(v.id)}>
+            <div key={v.id} className={disputed(v) ? "disputed" : ""} style={{ cursor: "pointer" }} {...clickable(() => setOpen(v.id))}>
               <div className="l">{v.label}</div>
               <div className="v">{disputed(v) ? "расходятся ↓" : fmtValue(v.kind, v.value)}</div>
             </div>
@@ -187,10 +187,10 @@ function ValuesTab({ values, onChange }: { values: CaseValue[]; onChange: (v: Ca
 }
 
 function ValueRow({ v, open, toggle, onChange }: { v: CaseValue; open: boolean; toggle: () => void; onChange: (v: CaseValue) => void }) {
-  const disputed = v.status === "conflict" || v.status === "appeal_possible";
+  const disputed = disputedV(v);
   return (
     <>
-      <tr className="clickable" onClick={toggle}>
+      <tr className="clickable" {...clickable(toggle)} aria-expanded={open}>
         <td style={{ width: "28%" }}>{v.label}</td>
         <td><b>{disputed ? <span className="muted">источники расходятся</span> : fmtValue(v.kind, v.value)}</b></td>
         <td className="nowrap"><StatusBadge status={v.status} /></td>
@@ -215,30 +215,27 @@ function DeadlinesTab({ caseId, deadlines, reload }: { caseId: number; deadlines
   const { can, refreshStats } = useSession();
   const [title, setTitle] = useState("");
   const [due, setDue] = useState("");
-  const [err, setErr] = useState("");
   const [editing, setEditing] = useState<Deadline | null>(null);
   const toast = useToast();
-  const patch = async (d: Deadline, body: Partial<Deadline>) => {
+  const { run, busy } = useAction();
+  const save = async (d: Deadline, body: Partial<Deadline>) => {
     await api(`/deadlines/${d.id}`, { method: "PATCH", json: body });
     reload();
     refreshStats();
-    if (body.status === "done") toast(`«${d.title}» — выполнено`);
   };
-  const add = async () => {
-    try {
-      await api(`/cases/${caseId}/deadlines`, { method: "POST", json: { title, due_date: due } });
-      setTitle("");
-      setDue("");
-      reload();
-      refreshStats();
-    } catch (e) {
-      setErr((e as Error).message);
-    }
-  };
-  const recalc = async () => {
+  const patch = (d: Deadline, body: Partial<Deadline>) =>
+    run(() => save(d, body), body.status === "done" ? `«${d.title}» — выполнено` : undefined);
+  const add = () => run(async () => {
+    await api(`/cases/${caseId}/deadlines`, { method: "POST", json: { title, due_date: due } });
+    setTitle("");
+    setDue("");
+    reload();
+    refreshStats();
+  }, "Срок добавлен");
+  const recalc = () => run(async () => {
     await api(`/cases/${caseId}/deadlines/recalc`, { method: "POST" });
     reload();
-  };
+  }, "Сроки пересчитаны по актам");
   return (
     <div className="stack">
       <div className="panel table-wrap">
@@ -264,11 +261,11 @@ function DeadlinesTab({ caseId, deadlines, reload }: { caseId: number; deadlines
                 <td className="nowrap">
                   {can("lawyer") && d.status === "open" && (
                     <>
-                      <button onClick={() => patch(d, { status: "done" })}>Выполнено</button>{" "}
+                      <button disabled={busy} onClick={() => patch(d, { status: "done" })}>Выполнено</button>{" "}
                       <button onClick={() => setEditing(d)}>Дата…</button>
                     </>
                   )}
-                  {can("lawyer") && d.status !== "open" && <button onClick={() => patch(d, { status: "open" })}>Вернуть</button>}
+                  {can("lawyer") && d.status !== "open" && <button disabled={busy} onClick={() => patch(d, { status: "open" })}>Вернуть</button>}
                 </td>
               </tr>
             ))}
@@ -278,11 +275,10 @@ function DeadlinesTab({ caseId, deadlines, reload }: { caseId: number; deadlines
       </div>
       {can("lawyer") && (
         <div className="panel pad row">
-          <input className="grow" placeholder="Свой срок: напр. «подать возражения на апелляционную жалобу»" value={title} onChange={(e) => setTitle(e.target.value)} />
-          <input type="date" value={due} onChange={(e) => setDue(e.target.value)} />
-          <button className="primary" disabled={!title || !due} onClick={add}>Добавить</button>
-          <button onClick={recalc} title="Пересчитать автоматические сроки по актам дела">Пересчитать</button>
-          {err && <div className="error">{err}</div>}
+          <input className="grow" aria-label="Название своего срока" placeholder="Свой срок: напр. «подать возражения на апелляционную жалобу»" value={title} onChange={(e) => setTitle(e.target.value)} />
+          <input type="date" aria-label="Дата срока" value={due} onChange={(e) => setDue(e.target.value)} />
+          <button className="primary" disabled={!title || !due || busy} onClick={add}>Добавить</button>
+          <button onClick={recalc} disabled={busy} title="Пересчитать автоматические сроки по актам дела">Пересчитать</button>
         </div>
       )}
       {editing && (
@@ -290,7 +286,7 @@ function DeadlinesTab({ caseId, deadlines, reload }: { caseId: number; deadlines
           hint="После ручной правки срок больше не пересчитывается автоматически (например, при загрузке производственного календаря)."
           onClose={() => setEditing(null)}
           onSubmit={async (v) => {
-            await patch(editing, { due_date: v });
+            await save(editing, { due_date: v });
             toast("Дата срока изменена");
           }} />
       )}

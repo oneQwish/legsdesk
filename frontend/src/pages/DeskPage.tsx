@@ -1,19 +1,23 @@
+import { useMemo } from "react";
 import { Link } from "react-router-dom";
 import { Topbar, useSession } from "../App";
-import { api, qs, type CaseBrief, type Page } from "../api";
+import { api, cachedApi, invalidateCache, localISO, qs, type CaseBrief, type Page } from "../api";
 import { VIEW_COLORS, type SavedView } from "../components/FilterPanel";
 import Pile from "../components/Pile";
 import DayStrip from "../components/DayStrip";
 import { CleanDesk, WeekProgress } from "../components/Progress";
-import { useToast } from "../components/overlay";
-import { useLoad } from "../components/ui";
+import { useAction, useLoad } from "../components/ui";
 
-const iso = (d: Date) => d.toISOString().slice(0, 10);
-const plus = (days: number) => iso(new Date(Date.now() + days * 86400000));
+const plus = (days: number) => {
+  const d = new Date();
+  d.setDate(d.getDate() + days);
+  return localISO(d);
+};
 
 function usePile(params: Record<string, string | number | boolean | undefined>, filter?: (c: CaseBrief) => boolean) {
   const r = useLoad(() => api<Page<CaseBrief>>(`/cases${qs({ size: 60, ...params })}`), [JSON.stringify(params)]);
-  const items = (r.data?.items ?? []).filter(filter ?? (() => true));
+  // один и тот же массив, пока не пришли новые данные, — иначе стопка сбрасывала бы позицию на каждую перерисовку
+  const items = useMemo(() => (r.data?.items ?? []).filter(filter ?? (() => true)), [r.data]); // eslint-disable-line react-hooks/exhaustive-deps
   return { items, total: filter ? items.length : r.data?.total ?? 0, loading: r.loading };
 }
 
@@ -25,13 +29,13 @@ export default function DeskPage() {
   const mine = usePile({ responsible: me.login, sort: "next_due" });
   const noUid = usePile({ has_uid: false, sort: "-updated_at" });
   const recent = usePile({ sort: "-updated_at" });
-  const views = useLoad(() => api<SavedView[]>("/views"), []);
-  const toast = useToast();
-  const removeFromDesk = async (v: SavedView) => {
+  const views = useLoad(() => cachedApi<SavedView[]>("/views"), []);
+  const { run } = useAction();
+  const removeFromDesk = (v: SavedView) => run(async () => {
     await api(`/views/${v.id}`, { method: "PATCH", json: { on_desk: false } });
+    invalidateCache("/views");
     views.reload();
-    toast(`«${v.name}» убрана со стола (подборка осталась в фильтрах)`);
-  };
+  }, `«${v.name}» убрана со стола (подборка осталась в фильтрах)`);
 
   const conflictsN = (stats?.values_by_status.conflict ?? 0) + (stats?.values_by_status.appeal_possible ?? 0);
   const hello = new Date().getHours() < 12 ? "Доброе утро" : new Date().getHours() < 18 ? "Добрый день" : "Добрый вечер";

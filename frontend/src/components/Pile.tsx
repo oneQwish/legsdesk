@@ -14,7 +14,9 @@ export default function Pile({ title, color, items, total, empty, loading }: {
 }) {
   const [i, setI] = useState(0);
   const [spread, setSpread] = useState(false);
-  useEffect(() => setI(0), [items]);
+  // к первой карточке — только когда сменился состав стопки, а не при каждом обновлении данных
+  const ids = items.map((c) => c.id).join(",");
+  useEffect(() => setI(0), [ids]);
   const n = items.length;
   const cur = items[Math.min(i, n - 1)];
   const go = (d: number) => n && setI((x) => (x + d + n) % n);
@@ -30,7 +32,8 @@ export default function Pile({ title, color, items, total, empty, loading }: {
         <div className="pile-empty">{loading ? "Загрузка…" : empty}</div>
       ) : (
         <>
-          <div className="pile" onWheel={(e) => { if (Math.abs(e.deltaY) > 20) go(e.deltaY > 0 ? 1 : -1); }}>
+          <div className="pile" title="Листать: кнопки ‹ › или колесо с зажатым Shift"
+               onWheel={(e) => { if (e.shiftKey && Math.abs(e.deltaY || e.deltaX) > 20) go((e.deltaY || e.deltaX) > 0 ? 1 : -1); }}>
             {n > 2 && <div className="ghost-card g2" />}
             {n > 1 && <div className="ghost-card g1" />}
             <CaseCard key={cur.id} c={cur} className="flip-in" />
@@ -57,7 +60,7 @@ export function Spread({ title, color, items, total, onClose }: { title: string;
     return () => window.removeEventListener("keydown", h);
   }, [onClose]);
   return (
-    <div className="spread-back" onClick={(e) => e.target === e.currentTarget && onClose()}>
+    <div className="spread-back" role="dialog" aria-modal="true" aria-label={title} onClick={(e) => e.target === e.currentTarget && onClose()}>
       <div className="spread" onClick={(e) => e.target === e.currentTarget && onClose()}>
         <div className="row">
           <span className="tone" style={{ width: 10, height: 10, borderRadius: "50%", background: color }} />

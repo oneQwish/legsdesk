@@ -537,3 +537,17 @@ details.rule div { white-space: pre-wrap; margin-top: 4px; font-size: 12px; }
   .strip-day { flex-basis: 50px; }
   .ribbon { gap: 18px; }
 }
+
+/* Сессия истекла: вход поверх открытой страницы */
+.session-expired { position: fixed; inset: 0; z-index: 200; background: color-mix(in srgb, var(--desk) 88%, transparent);
+  backdrop-filter: blur(2px); overflow: auto; padding-top: 8vh; }
+.session-expired .login { min-height: auto; }
+
+/* Фокус с клавиатуры виден на всём, что нажимается */
+:where(button, a, [role="link"], summary, .chip, .case-card):focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+tr[role="link"]:focus-visible { outline: 2px solid var(--ink); outline-offset: -2px; }
+
+/* Кому мешает движение — без анимаций */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
+}

@@ -16,19 +16,50 @@ function detail(body: unknown): string {
 
 export async function api<T>(path: string, init: RequestInit & { json?: unknown } = {}): Promise<T> {
   const { json, ...rest } = init;
-  const res = await fetch(`/api/v1${path}`, {
-    credentials: "same-origin",
-    ...rest,
-    headers: { ...(json !== undefined ? { "Content-Type": "application/json" } : {}), ...(rest.headers ?? {}) },
-    body: json !== undefined ? JSON.stringify(json) : rest.body,
-  });
+  let res: Response;
+  try {
+    res = await fetch(`/api/v1${path}`, {
+      credentials: "same-origin",
+      ...rest,
+      headers: { ...(json !== undefined ? { "Content-Type": "application/json" } : {}), ...(rest.headers ?? {}) },
+      body: json !== undefined ? JSON.stringify(json) : rest.body,
+    });
+  } catch {
+    throw new ApiError(0, "Нет связи с сервером — проверьте сеть и повторите");
+  }
   if (res.status === 204) return undefined as T;
-  const body = await res.json().catch(() => null);
+  const body = await res.json().catch(() => undefined);
   if (!res.ok) {
     if (res.status === 401 && !path.startsWith("/auth/")) window.dispatchEvent(new Event("lawdesk:unauthorized"));
-    throw new ApiError(res.status, detail(body) || `Ошибка ${res.status}`);
+    const fallback = res.status >= 500 ? `Сервер временно недоступен (${res.status}) — повторите позже` : `Ошибка ${res.status}`;
+    throw new ApiError(res.status, detail(body) || fallback);
   }
+  // 200 с HTML вместо JSON — обычно страница прокси или ошибки шлюза
+  if (body === undefined) throw new ApiError(res.status, "Сервер ответил не данными, а страницей — обновите страницу позже");
   return body as T;
+}
+
+const inflight = new Map<string, { at: number; p: Promise<unknown> }>();
+
+/** GET с коротким кэшем: одинаковые запросы из разных частей страницы (фасеты, подборки) идут один раз. */
+export function cachedApi<T>(path: string, ttlMs = 5000): Promise<T> {
+  const hit = inflight.get(path);
+  if (hit && Date.now() - hit.at < ttlMs) return hit.p as Promise<T>;
+  const p = api<T>(path);
+  inflight.set(path, { at: Date.now(), p });
+  p.catch(() => inflight.delete(path));
+  return p;
+}
+
+/** Сбросить кэш (после изменения подборок и т. п.). */
+export function invalidateCache(prefix = "") {
+  for (const k of [...inflight.keys()]) if (k.startsWith(prefix)) inflight.delete(k);
+}
+
+/** Дата ГГГГ-ММ-ДД по местному времени (toISOString дал бы UTC: с 00:00 до 03:00 по Москве — вчера). */
+export function localISO(d: Date = new Date()): string {
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }
 
 type QsValue = string | number | boolean | undefined | null | (string | number)[];

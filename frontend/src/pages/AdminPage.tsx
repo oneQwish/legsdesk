@@ -1,7 +1,24 @@
 import { Topbar } from "../App";
 import { useState } from "react";
 import { api, fmtDateTime, type Page, type Service, type Task } from "../api";
-import { ErrorBox, useLoad } from "../components/ui";
+import { ErrorBox, useAction, useLoad } from "../components/ui";
+import { useToast } from "../components/overlay";
+
+/** Копирование в буфер: navigator.clipboard работает только по HTTPS — иначе через выделение текста. */
+async function copyText(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand("copy");
+    ta.remove();
+    return ok;
+  }
+}
 
 type Tab = "services" | "tasks" | "export" | "users";
 
@@ -33,8 +50,13 @@ function Services() {
   const [types, setTypes] = useState("");
   const [secret, setSecret] = useState<{ name: string; key: string } | null>(null);
   const [err, setErr] = useState("");
+  const [creating, setCreating] = useState(false);
+  const { run, busy } = useAction();
+  const toast = useToast();
 
   const create = async () => {
+    if (creating) return;
+    setCreating(true);
     setErr("");
     try {
       const s = await api<Service>("/admin/services", {
@@ -49,22 +71,26 @@ function Services() {
       list.reload();
     } catch (e) {
       setErr((e as Error).message);
+    } finally {
+      setCreating(false);
     }
   };
-  const issue = async (s: Service) => {
+  const issue = (s: Service) => run(async () => {
     const k = await api<{ key: string }>(`/admin/services/${s.id}/keys`, { method: "POST" });
     setSecret({ name: s.name, key: k.key });
     list.reload();
-  };
-  const revoke = async (id: number) => {
+  });
+  const revoke = (id: number) => {
     if (!confirm("Отозвать ключ? Сервис с этим ключом перестанет работать сразу.")) return;
-    await api(`/admin/keys/${id}`, { method: "DELETE" });
-    list.reload();
+    run(async () => {
+      await api(`/admin/keys/${id}`, { method: "DELETE" });
+      list.reload();
+    }, "Ключ отозван");
   };
-  const toggle = async (s: Service) => {
+  const toggle = (s: Service) => run(async () => {
     await api(`/admin/services/${s.id}`, { method: "PATCH", json: { active: !s.active } });
     list.reload();
-  };
+  });
 
   return (
     <div className="stack">
@@ -73,7 +99,7 @@ function Services() {
           <b>Ключ для «{secret.name}» — скопируйте сейчас, больше он показан не будет:</b>
           <div className="mono" style={{ marginTop: 6 }}>{secret.key}</div>
           <div className="row" style={{ marginTop: 8 }}>
-            <button onClick={() => navigator.clipboard.writeText(secret.key)}>Копировать</button>
+            <button onClick={async () => toast(await copyText(secret.key) ? "Ключ скопирован" : "Скопируйте ключ вручную", "ok")}>Копировать</button>
             <button onClick={() => setSecret(null)}>Скрыть</button>
           </div>
         </div>
@@ -97,8 +123,8 @@ function Services() {
                   ))}
                 </td>
                 <td className="nowrap">
-                  <button onClick={() => issue(s)}>Новый ключ</button>{" "}
-                  <button onClick={() => toggle(s)}>{s.active ? "Отключить" : "Включить"}</button>
+                  <button disabled={busy} onClick={() => issue(s)}>Новый ключ</button>{" "}
+                  <button disabled={busy} onClick={() => toggle(s)}>{s.active ? "Отключить" : "Включить"}</button>
                 </td>
               </tr>
             ))}
@@ -122,7 +148,7 @@ function Services() {
           ))}
         </div>
         <ErrorBox error={err} />
-        <div><button className="primary" disabled={!name || sel.length === 0} onClick={create}>Создать и выдать ключ</button></div>
+        <div><button className="primary" disabled={!name || sel.length === 0 || creating} onClick={create}>Создать и выдать ключ</button></div>
       </div>
     </div>
   );
@@ -132,11 +158,12 @@ function Tasks() {
   const [status, setStatus] = useState("");
   const summary = useLoad(() => api<{ type: string; status: string; count: number }[]>("/tasks/summary"), []);
   const list = useLoad(() => api<Page<Task>>(`/tasks?size=100${status ? `&status=${status}` : ""}`), [status]);
-  const act = async (t: Task, what: "retry" | "cancel") => {
+  const { run } = useAction();
+  const act = (t: Task, what: "retry" | "cancel") => run(async () => {
     await api(`/tasks/${t.id}/${what}`, { method: "POST" });
     list.reload();
     summary.reload();
-  };
+  });
   const types = [...new Set(summary.data?.map((r) => r.type))];
   const statuses = ["queued", "running", "done", "failed", "cancelled"];
   return (
@@ -227,10 +254,11 @@ function ExportTab() {
 
 function Users() {
   const list = useLoad(() => api<{ id: number; login: string; full_name: string; role: string; active: boolean; last_login: string | null }[]>("/admin/users"), []);
-  const toggle = async (id: number, active: boolean) => {
+  const { run } = useAction();
+  const toggle = (id: number, active: boolean) => run(async () => {
     await api(`/admin/users/${id}?active=${active}`, { method: "PATCH" });
     list.reload();
-  };
+  });
   return (
     <div className="stack">
       <div className="muted small">Роли назначаются группами AD (администратор / юрист / просмотр) при каждом входе. Здесь можно только закрыть доступ к рабочему месту.</div>

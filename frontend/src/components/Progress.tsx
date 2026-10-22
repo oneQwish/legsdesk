@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useSession } from "../App";
-import { api } from "../api";
+import { cachedApi } from "../api";
 import { PromptModal } from "./overlay";
 import { useLoad } from "./ui";
 
@@ -29,7 +29,7 @@ function plural(n: number, one: string, few: string, many: string) {
 
 /** Недельный прогресс с целями (цели — личные, хранятся в браузере). */
 export function WeekProgress() {
-  const p = useLoad(() => api<ProgressResp>("/desk/progress"), []);
+  const p = useLoad(() => cachedApi<ProgressResp>("/desk/progress"), []);
   const [goals, setGoals] = useState(loadGoals);
   const [editing, setEditing] = useState<(typeof METRICS)[number] | null>(null);
   const goal = (k: string, d: number) => goals[k] ?? d;
@@ -74,7 +74,7 @@ export function WeekProgress() {
 /** «Чистый стол»: всё разобрано — спокойный экран и серия дней без просрочек; иначе — что осталось до чистоты. */
 export function CleanDesk() {
   const { stats } = useSession();
-  const p = useLoad(() => api<ProgressResp>("/desk/progress"), []);
+  const p = useLoad(() => cachedApi<ProgressResp>("/desk/progress"), []);
   const conflicts = (stats?.values_by_status.conflict ?? 0) + (stats?.values_by_status.appeal_possible ?? 0);
   const overdue = stats?.deadlines_overdue ?? 0;
   const clean = stats !== null && conflicts === 0 && overdue === 0;

@@ -6,7 +6,7 @@ import { api, fmtDate, qs, shortCourt, type CaseBrief, type Page } from "../api"
 import CaseCard, { caseTone } from "../components/CaseCard";
 import FilterPanel, { ActiveChips, activeCount } from "../components/FilterPanel";
 import { Icon } from "../components/icons";
-import { DueBadge, ErrorBox, Pager, useLoad } from "../components/ui";
+import { DueBadge, ErrorBox, Pager, clickable, useLoad } from "../components/ui";
 
 type Mode = "cards" | "table";
 
@@ -50,9 +50,9 @@ export default function CasesPage() {
   return (
     <>
       <Topbar title="Дела" sub="Фильтры слева можно комбинировать; набор сохраняется подборкой и выкладывается на стол.">
-        <div className="seg" role="tablist" aria-label="Вид">
-          <button className={mode === "cards" ? "on" : ""} onClick={() => setMode("cards")}><Icon name="spread" size={14} /> Карточки</button>
-          <button className={mode === "table" ? "on" : ""} onClick={() => setMode("table")}><Icon name="table" size={14} /> Таблица</button>
+        <div className="seg" role="group" aria-label="Вид">
+          <button className={mode === "cards" ? "on" : ""} aria-pressed={mode === "cards"} onClick={() => setMode("cards")}><Icon name="spread" size={14} /> Карточки</button>
+          <button className={mode === "table" ? "on" : ""} aria-pressed={mode === "table"} onClick={() => setMode("table")}><Icon name="table" size={14} /> Таблица</button>
         </div>
       </Topbar>
       <div className="with-filters">
@@ -99,7 +99,7 @@ export default function CasesPage() {
               </thead>
               <tbody>
                 {list.data?.items.map((c) => (
-                  <tr key={c.id} className={`clickable ${caseTone(c)}`} onClick={() => nav(`/cases/${c.id}`)}>
+                  <tr key={c.id} className={`clickable ${caseTone(c)}`} {...clickable(() => nav(`/cases/${c.id}`))}>
                     <td style={{ padding: 0, background: "var(--tone)" }}></td>
                     <td className="nowrap">
                       <b className="serif" style={{ fontSize: 15 }}>{c.case_number || "без номера"}</b>

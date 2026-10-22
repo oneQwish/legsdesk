@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, fmtDateTime, fmtValue, moneyHint, type CaseValue, type Observation } from "../api";
 import { useSession } from "../App";
-import { StatusBadge } from "./ui";
+import { StatusBadge, clickable, useAction } from "./ui";
 
 /** Варианты значения: наблюдения с одинаковым видом значения объединяются (сколько источников за каждое). */
 function groupChoices(v: CaseValue) {
@@ -39,6 +39,9 @@ export default function ResolvePanel({ value, onDone, hotkeys = false }: { value
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const editable = can("lawyer");
+  const reopenAction = useAction();
+  // те же условия, что у кнопки «Принять»: Enter не обходит проверку (своё значение — только с комментарием)
+  const ready = pick !== null && (pick !== "own" || (!!own.trim() && !!note.trim()));
 
   useEffect(() => {
     setPick(null);
@@ -48,7 +51,7 @@ export default function ResolvePanel({ value, onDone, hotkeys = false }: { value
   }, [value.id]);
 
   const submit = async () => {
-    if (pick === null) return;
+    if (pick === null || busy || !ready) return;
     setBusy(true);
     setError("");
     try {
@@ -61,14 +64,8 @@ export default function ResolvePanel({ value, onDone, hotkeys = false }: { value
     }
   };
 
-  const reopen = async () => {
-    setBusy(true);
-    try {
-      onDone(await api<CaseValue>(`/values/${value.id}/reopen`, { method: "POST", json: { note: "" } }));
-    } finally {
-      setBusy(false);
-    }
-  };
+  const reopen = () =>
+    reopenAction.run(async () => onDone(await api<CaseValue>(`/values/${value.id}/reopen`, { method: "POST", json: { note: "" } })));
 
   useEffect(() => {
     if (!hotkeys || !editable) return;
@@ -81,7 +78,8 @@ export default function ResolvePanel({ value, onDone, hotkeys = false }: { value
       const n = Number(e.key);
       if (n >= 1 && n <= choices.length) setPick(n - 1);
       if (e.key === "0") setPick("own");
-      if (e.key === "Enter") submit();
+      // Enter на ссылке или кнопке — это их нажатие, а не «принять решение»
+      if (e.key === "Enter" && !t.closest("a, button")) submit();
     };
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
@@ -95,7 +93,7 @@ export default function ResolvePanel({ value, onDone, hotkeys = false }: { value
           <b style={{ fontSize: 16 }}>{fmtValue(value.kind, value.value)}</b>
           <span className="muted small">{value.resolved_by}, {fmtDateTime(value.resolved_at)}</span>
           <span className="spacer" />
-          {editable && <button onClick={reopen} disabled={busy}>Пересмотреть</button>}
+          {editable && <button onClick={reopen} disabled={reopenAction.busy}>Пересмотреть</button>}
         </div>
         {value.resolution_note && <div className="quote">{value.resolution_note}</div>}
         <div className="panel">{value.observations.map((o) => <ObservationLine key={o.id} o={o} kind={value.kind} />)}</div>
@@ -113,7 +111,7 @@ export default function ResolvePanel({ value, onDone, hotkeys = false }: { value
         return hint ? <div className="hint">{hint}</div> : null;
       })()}
       {choices.map((group, i) => (
-        <div key={i} className={`choice ${pick === i ? "on" : ""}`} onClick={() => editable && setPick(i)}>
+        <div key={i} className={`choice ${pick === i ? "on" : ""}`} {...(editable ? clickable(() => setPick(i)) : {})} role="radio" aria-checked={pick === i}>
           {hotkeys && editable && <kbd>{i + 1}</kbd>}
           <div className="grow">
             <div className="val">{fmtValue(value.kind, group[0].value)}</div>
@@ -135,12 +133,12 @@ export default function ResolvePanel({ value, onDone, hotkeys = false }: { value
       ))}
       {editable && (
         <>
-          <div className={`choice ${pick === "own" ? "on" : ""}`} onClick={() => setPick("own")}>
+          <div className={`choice ${pick === "own" ? "on" : ""}`} {...clickable(() => setPick("own"))} role="radio" aria-checked={pick === "own"}>
             {hotkeys && <kbd>0</kbd>}
             <div className="grow stack" style={{ gap: 6 }}>
               <span>Своё значение</span>
               {pick === "own" && (
-                <input autoFocus value={own} onChange={(e) => setOwn(e.target.value)}
+                <input autoFocus aria-label="Своё значение" value={own} onChange={(e) => setOwn(e.target.value)}
                        placeholder={value.kind === "money" ? "123456.78" : value.kind === "date" ? "ГГГГ-ММ-ДД" : "значение"} />
               )}
             </div>
@@ -151,7 +149,7 @@ export default function ResolvePanel({ value, onDone, hotkeys = false }: { value
           </label>
           {error && <div className="error">{error}</div>}
           <div className="row">
-            <button className="primary" disabled={busy || pick === null || (pick === "own" && (!own || !note))} onClick={submit}>
+            <button className="primary" disabled={busy || !ready} onClick={submit}>
               Принять значение
             </button>
             {hotkeys && <span className="muted small"><kbd>1</kbd>–<kbd>9</kbd> выбрать, <kbd>Enter</kbd> принять, <kbd>J</kbd>/<kbd>K</kbd> следующий/предыдущий</span>}

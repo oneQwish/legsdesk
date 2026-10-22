@@ -3,6 +3,12 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState, ty
 
 // --- Модальное окно ----------------------------------------------------------------------------
 
+// Открытые окна по порядку: Escape закрывает только верхнее (окно поверх палитры, палитра поверх страницы)
+const stack: number[] = [];
+let seq = 0;
+export const anyModalOpen = () => stack.length > 0;
+const FOCUSABLE = "a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])";
+
 export function Modal({ title, onClose, children, footer, width = 480 }: {
   title: string;
   onClose: () => void;
@@ -14,17 +20,36 @@ export function Modal({ title, onClose, children, footer, width = 480 }: {
   const close = useRef(onClose);
   close.current = onClose;
   useEffect(() => {
-    const h = (e: KeyboardEvent) => e.key === "Escape" && close.current();
+    const id = ++seq;
+    stack.push(id);
+    const opener = document.activeElement as HTMLElement | null;
+    const h = (e: KeyboardEvent) => {
+      if (stack[stack.length - 1] !== id) return;
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        close.current();
+      }
+      if (e.key === "Tab" && box.current) {
+        // фокус не уходит из окна на страницу под ним
+        const els = [...box.current.querySelectorAll<HTMLElement>(FOCUSABLE)];
+        if (!els.length) return;
+        const first = els[0], last = els[els.length - 1];
+        if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+        else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+      }
+    };
     window.addEventListener("keydown", h);
-    return () => window.removeEventListener("keydown", h);
-  }, []);
-  useEffect(() => {
     // фокус — только при открытии окна
     box.current?.querySelector<HTMLElement>("input, select, textarea, button.primary")?.focus();
+    return () => {
+      window.removeEventListener("keydown", h);
+      stack.splice(stack.indexOf(id), 1);
+      opener?.focus?.(); // вернуть фокус туда, откуда окно открыли
+    };
   }, []);
   return createPortal(
     <div className="modal-back" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="modal panel" style={{ maxWidth: width }} ref={box} role="dialog" aria-label={title}>
+      <div className="modal panel" style={{ maxWidth: width }} ref={box} role="dialog" aria-modal="true" aria-label={title}>
         <div className="modal-head">
           <h2 style={{ margin: 0 }}>{title}</h2>
           <button className="icon-btn" onClick={onClose} aria-label="Закрыть">×</button>
@@ -53,6 +78,7 @@ export function PromptModal({ title, label, initial = "", type = "text", hint, p
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
   const submit = async () => {
+    if (busy) return;
     setBusy(true);
     setErr("");
     try {

@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { ACTION_LABEL, api, daysLeft, DEADLINE_KIND, fmtDate, type CaseFull, type EventItem } from "../api";
+import { ACTION_LABEL, api, daysLeft, DEADLINE_KIND, fmtDate, localISO, type CaseFull, type EventItem } from "../api";
 import { useLoad } from "./ui";
 
 type Item = { date: string; kind: "doc" | "deadline" | "decision" | "event"; title: string; sub?: string; to?: string; color: string; future?: boolean };
@@ -34,7 +34,7 @@ export default function Chronology({ c }: { c: CaseFull }) {
   const visible = items.filter((i) => show[i.kind]);
   if (!items.length) return <div className="panel empty-state">Событий пока нет</div>;
   const t = (s: string) => new Date(s + "T00:00:00").getTime();
-  const today = new Date().toISOString().slice(0, 10);
+  const today = localISO();
   const lo = Math.min(...items.map((i) => t(i.date)), t(today));
   const hi = Math.max(...items.map((i) => t(i.date)), t(today));
   const span = Math.max(hi - lo, 86400000);
@@ -62,8 +62,8 @@ export default function Chronology({ c }: { c: CaseFull }) {
                 style={{ left: `${x(i.date)}%`, top: 18 + lane[i.kind] * 15, background: i.color }}
                 title={`${fmtDate(i.date)} — ${i.title}${i.sub ? `\n${i.sub}` : ""}`} />
         ))}
-        <span className="axis-edge left">{fmtDate(new Date(lo).toISOString().slice(0, 10))}</span>
-        <span className="axis-edge right">{fmtDate(new Date(hi).toISOString().slice(0, 10))}</span>
+        <span className="axis-edge left">{fmtDate(localISO(new Date(lo)))}</span>
+        <span className="axis-edge right">{fmtDate(localISO(new Date(hi)))}</span>
       </div>
       <div className="panel chrono-list">
         {visible.slice().reverse().map((i, k) => (

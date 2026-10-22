@@ -4,7 +4,7 @@ import { Topbar, useSession } from "../App";
 import { api, qs, shortCourt, type CaseBrief, type CaseValue, type Page } from "../api";
 import { ActiveChips, FilterButton, filterParams } from "../components/FilterPanel";
 import ResolvePanel from "../components/ResolvePanel";
-import { ErrorBox, Pager, StatusBadge, useLoad } from "../components/ui";
+import { ErrorBox, Pager, StatusBadge, clickable, useLoad } from "../components/ui";
 
 type Item = { value: CaseValue; case: CaseBrief };
 
@@ -23,7 +23,18 @@ export default function ConflictsPage() {
   const items = list.data?.items ?? [];
   const cur = items[sel];
 
-  useEffect(() => setSel(0), [field, page]);
+  useEffect(() => setSel(0), [fp.toString()]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Разобраны все конфликты страницы, а в очереди ещё есть — подгрузить следующие, а не показывать «конфликтов нет»
+  useEffect(() => {
+    const d = list.data;
+    if (!d || list.loading || items.length > 0 || d.total === 0) return;
+    if (page > 1 && (page - 1) * d.size >= d.total) {
+      const n = new URLSearchParams(sp);
+      n.set("page", String(Math.ceil(d.total / d.size)));
+      setSp(n, { replace: true });
+    } else list.reload();
+  }, [items.length, list.data?.total]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
@@ -46,7 +57,7 @@ export default function ConflictsPage() {
   return (
     <>
       <Topbar title="Очередь конфликтов" sub="Источники расходятся — выберите верное значение. Решение уходит в журнал и во внешние системы через коннекторы.">
-      <select value={field} onChange={(e) => { const n = new URLSearchParams(sp); n.delete("page"); if (e.target.value) n.set("field", e.target.value); else n.delete("field"); setSp(n); }}>
+      <select aria-label="Поле" value={field} onChange={(e) => { const n = new URLSearchParams(sp); n.delete("page"); if (e.target.value) n.set("field", e.target.value); else n.delete("field"); setSp(n); }}>
         <option value="">Все поля</option>
         {fields.data?.map((f) => <option key={f.key} value={f.key}>{f.label}</option>)}
       </select>
@@ -54,13 +65,13 @@ export default function ConflictsPage() {
       </Topbar>
       <ActiveChips />
       <ErrorBox error={list.error} />
-      {list.data && items.length === 0 ? (
+      {list.data && items.length === 0 && list.data.total === 0 ? (
         <div className="panel empty-state">Конфликтов нет 🎉</div>
       ) : (
         <div className="split">
           <div className="panel">
             {items.map((it, i) => (
-              <div key={it.value.id} className={`queue-item ${i === sel ? "on" : ""}`} onClick={() => setSel(i)}>
+              <div key={it.value.id} className={`queue-item ${i === sel ? "on" : ""}`} {...clickable(() => setSel(i))} aria-current={i === sel}>
                 <div className="row">
                   <b>{it.value.label}</b>
                   <span className="spacer" />

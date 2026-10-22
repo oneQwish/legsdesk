@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useDeferredValue, useMemo, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { Topbar, useSession } from "../App";
 import { PromptModal, useToast } from "../components/overlay";
@@ -18,11 +18,15 @@ export default function DocumentPage() {
   const toast = useToast();
   const d = doc.data;
 
+  // подсветка по отложенному значению: длинный текст OCR не тормозит ввод
+  const findLater = useDeferredValue(find.trim());
   const highlighted = useMemo(() => {
-    if (!d?.text || find.trim().length < 2) return null;
-    const re = new RegExp(`(${find.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})`, "gi");
-    return d.text.split(re).map((part, i) => (i % 2 ? <mark key={i}>{part}</mark> : part));
-  }, [d?.text, find]);
+    if (!d?.text || findLater.length < 2) return null;
+    const re = new RegExp(`(${findLater.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})`, "gi");
+    const parts = d.text.split(re);
+    const MAX = 500; // больше совпадений не подсвечиваем — их всё равно не просмотреть
+    return parts.map((part, i) => (i % 2 && i < MAX * 2 ? <mark key={i}>{part}</mark> : part));
+  }, [d?.text, findLater]);
 
   if (doc.error) return <ErrorBox error={doc.error} />;
   if (!d) return null;
@@ -88,7 +92,7 @@ export default function DocumentPage() {
               <h2 style={{ margin: 0 }}>Текст</h2>
               <span className="muted small">{d.text_source}</span>
               <span className="spacer" />
-              <input placeholder="Найти в тексте" value={find} onChange={(e) => setFind(e.target.value)} />
+              <input aria-label="Найти в тексте" placeholder="Найти в тексте" value={find} onChange={(e) => setFind(e.target.value)} />
             </div>
             <div className="doctext">{highlighted ?? (d.text || <span className="muted">Текста нет</span>)}</div>
           </div>

@@ -1,7 +1,7 @@
 import { Topbar } from "../App";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { api, fmtDate, qs, type DocumentBrief, type Page } from "../api";
-import { ErrorBox, Pager, useLoad } from "../components/ui";
+import { ErrorBox, Pager, clickable, useLoad } from "../components/ui";
 
 export default function DocumentsPage() {
   const nav = useNavigate();
@@ -20,7 +20,7 @@ export default function DocumentsPage() {
     <>
       <Topbar title="Документы" sub="Сканы, цифровые оригиналы писем, иски и акты." />
       <div className="panel pad row" style={{ marginBottom: 12 }}>
-        <input className="grow" placeholder="Имя файла, трек-номер или sha256" defaultValue={params.q ?? ""}
+        <input className="grow" aria-label="Поиск документов" placeholder="Имя файла, трек-номер или sha256" defaultValue={params.q ?? ""}
                onKeyDown={(e) => e.key === "Enter" && set({ q: (e.target as HTMLInputElement).value })} />
         <select value={params.kind ?? ""} onChange={(e) => set({ kind: e.target.value })}>
           <option value="">Все типы</option>
@@ -42,7 +42,7 @@ export default function DocumentsPage() {
             <thead><tr><th>Дата акта</th><th>Вид акта</th><th>Тип</th><th>Файл</th><th>Дело</th><th>Хранилище</th></tr></thead>
             <tbody>
               {list.data?.items.map((d) => (
-                <tr key={d.id} className="clickable" onClick={() => nav(`/documents/${d.id}`)}>
+                <tr key={d.id} className="clickable" {...clickable(() => nav(`/documents/${d.id}`))}>
                   <td className="nowrap">{fmtDate(d.act_date)}</td>
                   <td>{d.act_type || <span className="muted">—</span>}<div className="muted small">{d.instance}</div></td>
                   <td>{d.kind}{d.track_no && <div className="mono muted">{d.track_no}</div>}</td>

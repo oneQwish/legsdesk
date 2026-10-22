@@ -2,19 +2,20 @@ import { Topbar } from "../App";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { ACTION_LABEL, api, fmtDateTime, qs, type EventItem, type Page } from "../api";
-import { ErrorBox, Pager, useLoad } from "../components/ui";
+import { ErrorBox, Pager, useDebounced, useLoad } from "../components/ui";
 import { describe } from "./CasePage";
 
 export default function JournalPage() {
   const [action, setAction] = useState("");
   const [actor, setActor] = useState("");
   const [page, setPage] = useState(1);
-  const list = useLoad(() => api<Page<EventItem>>(`/journal${qs({ action, actor, page, size: 100 })}`), [action, actor, page]);
+  const who = useDebounced(actor.trim(), 400); // запрос — когда перестали печатать, а не на каждую букву
+  const list = useLoad(() => api<Page<EventItem>>(`/journal${qs({ action, actor: who, page, size: 100 })}`), [action, who, page]);
   return (
     <>
       <Topbar title="Журнал" sub="Все действия людей и сервисов; решения юристов уходят отсюда во внешние системы через коннекторы.">
-      <input placeholder="Кто (логин/сервис)" value={actor} onChange={(e) => { setActor(e.target.value); setPage(1); }} />
-      <select value={action} onChange={(e) => { setAction(e.target.value); setPage(1); }}>
+      <input aria-label="Кто" placeholder="Кто (логин/сервис)" value={actor} onChange={(e) => { setActor(e.target.value); setPage(1); }} />
+      <select aria-label="Действие" value={action} onChange={(e) => { setAction(e.target.value); setPage(1); }}>
         <option value="">Все действия</option>
         {Object.entries(ACTION_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
       </select>

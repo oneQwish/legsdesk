@@ -1,19 +1,28 @@
-import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
-import { NavLink, Navigate, Route, Routes } from "react-router-dom";
+import { createContext, lazy, Suspense, useCallback, useContext, useEffect, useState, type ComponentType, type ReactNode } from "react";
+import { NavLink, Navigate, Route, Routes, useParams } from "react-router-dom";
 import { api, type Me, type Role, type Stats } from "./api";
 import { Icon } from "./components/icons";
-import { ToastProvider } from "./components/overlay";
+import { anyModalOpen, ToastProvider } from "./components/overlay";
 import QuickSearch from "./components/QuickSearch";
-import AdminPage from "./pages/AdminPage";
 import CasePage from "./pages/CasePage";
 import CasesPage from "./pages/CasesPage";
 import ConflictsPage from "./pages/ConflictsPage";
 import DeadlinesPage from "./pages/DeadlinesPage";
 import DeskPage from "./pages/DeskPage";
-import DocumentPage from "./pages/DocumentPage";
 import DocumentsPage from "./pages/DocumentsPage";
 import JournalPage from "./pages/JournalPage";
 import LoginPage from "./pages/LoginPage";
+
+// Редко открываемые страницы грузятся отдельно — первый экран открывается быстрее
+const AdminPage = lazy(() => import("./pages/AdminPage"));
+const DocumentPage = lazy(() => import("./pages/DocumentPage"));
+
+/** Страница с :id создаётся заново при смене id: иначе при переходе из дела в дело
+ *  на миг показывалось бы прежнее дело, а кнопки действовали бы на него. */
+function ById({ page: Page }: { page: ComponentType }) {
+  const { id } = useParams();
+  return <Page key={id} />;
+}
 
 interface Session {
   me: Me;
@@ -50,6 +59,7 @@ export default function App() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
   const [stats, setStats] = useState<Stats | null>(null);
   const [search, setSearch] = useState(false);
+  const [expired, setExpired] = useState(false);
 
   const refreshStats = useCallback(() => {
     api<Stats>("/stats").then(setStats).catch(() => undefined);
@@ -57,7 +67,8 @@ export default function App() {
 
   useEffect(() => {
     api<Me>("/auth/me").then(setMe).catch(() => setMe(null));
-    const onUnauthorized = () => setMe(null);
+    // сессия истекла посреди работы: вход поверх страницы, а не вместо неё — недописанный комментарий не пропадёт
+    const onUnauthorized = () => setExpired(true);
     window.addEventListener("lawdesk:unauthorized", onUnauthorized);
     return () => window.removeEventListener("lawdesk:unauthorized", onUnauthorized);
   }, []);
@@ -70,7 +81,8 @@ export default function App() {
     const h = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement;
       const typing = t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT";
-      if ((e.key === "k" && (e.ctrlKey || e.metaKey)) || (e.key === "/" && !typing)) {
+      if (((e.key === "k" || e.key === "л") && (e.ctrlKey || e.metaKey)) || (e.key === "/" && !typing)) {
+        if (anyModalOpen()) return;
         e.preventDefault();
         setSearch(true);
       }
@@ -88,7 +100,7 @@ export default function App() {
   const initials = (me.full_name || me.login).split(/\s+/).map((w) => w[0]).join("").slice(0, 2).toUpperCase();
 
   const logout = async () => {
-    await api("/auth/logout", { method: "POST" });
+    await api("/auth/logout", { method: "POST" }).catch(() => undefined); // выйти локально даже без связи
     setMe(null);
   };
 
@@ -123,18 +135,26 @@ export default function App() {
             <Routes>
               <Route path="/" element={<DeskPage />} />
               <Route path="/cases" element={<CasesPage />} />
-              <Route path="/cases/:id" element={<CasePage />} />
+              <Route path="/cases/:id" element={<ById page={CasePage} />} />
               <Route path="/conflicts" element={<ConflictsPage />} />
               <Route path="/deadlines" element={<DeadlinesPage />} />
               <Route path="/documents" element={<DocumentsPage />} />
-              <Route path="/documents/:id" element={<DocumentPage />} />
+              <Route path="/documents/:id" element={<Suspense fallback={null}><ById page={DocumentPage} /></Suspense>} />
               <Route path="/journal" element={<JournalPage />} />
-              <Route path="/admin" element={can("admin") ? <AdminPage /> : <Navigate to="/" />} />
+              <Route path="/admin" element={can("admin") ? <Suspense fallback={null}><AdminPage /></Suspense> : <Navigate to="/" />} />
               <Route path="*" element={<Navigate to="/" />} />
             </Routes>
           </main>
         </div>
         {search && <QuickSearch onClose={() => setSearch(false)} />}
+        {expired && (
+          <div className="session-expired" role="dialog" aria-modal="true" aria-label="Сессия истекла">
+            <div className="notice" style={{ maxWidth: 420, margin: "0 auto 12px" }}>
+              Сессия истекла — войдите снова. Открытая страница и введённый текст сохранятся.
+            </div>
+            <LoginPage onLogin={(m) => { setMe(m); setExpired(false); }} />
+          </div>
+        )}
       </ToastProvider>
     </SessionCtx.Provider>
   );

@@ -22,7 +22,9 @@ export default function CaseCard({ c, style, className = "" }: { c: CaseBrief; s
   const overdue = c.next_due !== null && daysLeft(c.next_due) < 0;
   const object = [c.complex, c.building && `корп. ${c.building}`, c.flat && `кв. ${c.flat}`].filter(Boolean).join(", ");
   return (
-    <div className={`case-card ${caseTone(c)} ${className}`} style={style} onClick={() => nav(`/cases/${c.id}`)}
+    <div className={`case-card ${caseTone(c)} ${className}`} style={style}
+         onClick={(e) => (e.ctrlKey || e.metaKey ? window.open(`/cases/${c.id}`, "_blank") : nav(`/cases/${c.id}`))}
+         onAuxClick={(e) => e.button === 1 && window.open(`/cases/${c.id}`, "_blank")}
          role="link" tabIndex={0} onKeyDown={(e) => e.key === "Enter" && nav(`/cases/${c.id}`)}>
       {overdue && <span className="stamp" style={{ color: "var(--seal)" }}>просрочен</span>}
       <div className="num">{c.case_number || "без номера"}</div>

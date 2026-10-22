@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useSession } from "../App";
-import { api, qs, shortCourt, type CaseBrief, type Page } from "../api";
+import { api, cachedApi, qs, shortCourt, type CaseBrief, type Page } from "../api";
 import type { SavedView } from "./FilterPanel";
 import { Modal, useToast } from "./overlay";
 
@@ -25,8 +25,8 @@ export default function QuickSearch({ onClose }: { onClose: () => void }) {
   const caseId = loc.pathname.match(/^\/cases\/(\d+)/)?.[1];
 
   useEffect(() => {
-    api<SavedView[]>("/views").then(setViews).catch(() => undefined);
-    api<{ facets: Record<string, Facet[]> }>("/cases/facets").then((f) => setJudges(f.facets.judge ?? [])).catch(() => undefined);
+    cachedApi<SavedView[]>("/views").then(setViews).catch(() => undefined);
+    cachedApi<{ facets: Record<string, Facet[]> }>("/cases/facets", 60000).then((f) => setJudges(f.facets.judge ?? [])).catch(() => undefined);
   }, []);
 
   useEffect(() => {
@@ -95,7 +95,11 @@ export default function QuickSearch({ onClose }: { onClose: () => void }) {
   const exec = async (c: Cmd | undefined) => {
     if (!c) return;
     onClose();
-    await c.run();
+    try {
+      await c.run();
+    } catch (e) {
+      toast((e as Error).message || "Не удалось выполнить команду", "err");
+    }
   };
 
   let lastGroup = "";

@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { api, fmtDate, qs, shortCourt } from "../api";
+import { api, cachedApi, fmtDate, invalidateCache, localISO, qs, shortCourt } from "../api";
 import { createPortal } from "react-dom";
 import { Modal, useToast } from "./overlay";
 import { Icon } from "./icons";
@@ -76,15 +76,23 @@ export function activeCount(sp: URLSearchParams): number {
 export default function FilterPanel({ page, onClose }: { page: "cases" | "conflicts" | "deadlines"; onClose?: () => void }) {
   const [sp, setSp] = useSearchParams();
   const fp = filterParams(sp);
-  const facets = useLoad(() => api<FacetsResp>(`/cases/facets${qs(fp)}`), [fp.toString()]);
-  const [q, setQ] = useState(sp.get("q") ?? "");
+  const facets = useLoad(() => cachedApi<FacetsResp>(`/cases/facets${qs(fp)}`), [fp.toString()]);
+  const urlQ = sp.get("q") ?? "";
+  const [q, setQ] = useState(urlQ);
   const [saving, setSaving] = useState(false);
+  // поиск в адресе поменялся извне (чип «×», подборка, «назад») — поле ввода следует за ним
+  useEffect(() => setQ(urlQ), [urlQ]);
 
-  /** Изменить параметры адреса; любое изменение фильтра сбрасывает страницу на первую. */
+  /** Изменить параметры адреса; любое изменение фильтра сбрасывает страницу на первую.
+   *  От актуального адреса (ссылка latest), а не от запомненного при отрисовке: иначе отложенный поиск
+   *  затирал бы фильтр, выбранный за эти 350 мс (в react-router 6 и setSp(prev => …) получает старый адрес). */
+  const latest = useRef(sp);
+  latest.current = sp;
   const update = (fn: (p: URLSearchParams) => void) => {
-    const next = new URLSearchParams(sp);
+    const next = new URLSearchParams(latest.current);
     fn(next);
     next.delete("page");
+    latest.current = next;
     setSp(next, { replace: true });
   };
   const toggle = (key: string, value: string) =>
@@ -96,7 +104,7 @@ export default function FilterPanel({ page, onClose }: { page: "cases" | "confli
   const setOne = (key: string, value: string) => update((p) => (value ? p.set(key, value) : p.delete(key)));
 
   useEffect(() => {
-    const t = setTimeout(() => q !== (sp.get("q") ?? "") && setOne("q", q), 350);
+    const t = setTimeout(() => q !== urlQ && setOne("q", q.trim() ? q : ""), 350);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [q]);
@@ -120,7 +128,7 @@ export default function FilterPanel({ page, onClose }: { page: "cases" | "confli
       <SavedViews page={page} onSave={() => setSaving(true)} canSave={n > 0} />
       <div className="fp-total">{d ? <><b>{d.total}</b> дел подходит</> : " "}</div>
 
-      <input className="fp-search" placeholder="Номер, УИД, истец, договор" value={q} onChange={(e) => setQ(e.target.value)} />
+      <input className="fp-search" placeholder="Номер, УИД, истец, договор" aria-label="Поиск по делам" value={q} onChange={(e) => setQ(e.target.value)} />
 
       <Section title="Быстрые" open>
         {FLAGS.map((f) => {
@@ -160,7 +168,7 @@ export default function FilterPanel({ page, onClose }: { page: "cases" | "confli
         <div className="row" style={{ gap: 4 }}>
           {[["Просрочено", -3650, -1], ["Сегодня–3 дня", 0, 3], ["Неделя", 0, 7], ["Месяц", 0, 31]].map(([label, a, b]) => (
             <button key={label as string} className="chip" onClick={() => update((p) => {
-              const day = (n: number) => new Date(Date.now() + n * 86400000).toISOString().slice(0, 10);
+              const day = (n: number) => { const d = new Date(); d.setDate(d.getDate() + n); return localISO(d); };
               p.set("due_from", day(a as number));
               p.set("due_before", day(b as number));
             })}>{label}</button>
@@ -283,9 +291,12 @@ export const VIEW_COLORS: Record<string, string> = { ink: "var(--ink)", seal: "v
 
 function SavedViews({ page, onSave, canSave }: { page: string; onSave: () => void; canSave: boolean }) {
   const [sp, setSp] = useSearchParams();
-  const views = useLoad(() => api<SavedView[]>("/views"), []);
+  const views = useLoad(() => cachedApi<SavedView[]>("/views"), []);
   useEffect(() => {
-    const h = () => views.reload();
+    const h = () => {
+      invalidateCache("/views");
+      views.reload();
+    };
     window.addEventListener("lawdesk:views", h);
     return () => window.removeEventListener("lawdesk:views", h);
   }, [views]);
@@ -316,7 +327,10 @@ function SaveViewModal({ page, params, onClose }: { page: string; params: string
   const [color, setColor] = useState("ink");
   const [onDesk, setOnDesk] = useState(true);
   const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
   const save = async () => {
+    if (busy || !name.trim()) return;
+    setBusy(true);
     try {
       await api("/views", { method: "POST", json: { name, page, params, color, on_desk: onDesk } });
       window.dispatchEvent(new Event("lawdesk:views"));
@@ -324,20 +338,23 @@ function SaveViewModal({ page, params, onClose }: { page: string; params: string
       onClose();
     } catch (e) {
       setErr((e as Error).message);
+    } finally {
+      setBusy(false);
     }
   };
+  const COLOR_NAME: Record<string, string> = { ink: "чернила", seal: "сургуч", ochre: "охра", ok: "малахит", violet: "фиолетовый" };
   return (
     <Modal title="Сохранить подборку" onClose={onClose}
-           footer={<><button onClick={onClose}>Отмена</button><button className="primary" disabled={!name.trim()} onClick={save}>Сохранить</button></>}>
+           footer={<><button onClick={onClose}>Отмена</button><button className="primary" disabled={!name.trim() || busy} onClick={save}>Сохранить</button></>}>
       <div className="stack">
         <label className="field">Название
           <input value={name} onChange={(e) => setName(e.target.value)} placeholder="напр.: «Разбор на сегодня», «Корпус 401, долг > 500 тыс.»"
-                 onKeyDown={(e) => e.key === "Enter" && name.trim() && save()} />
+                 onKeyDown={(e) => e.key === "Enter" && save()} />
         </label>
         <div className="row">
           <span className="small muted">Цвет стопки</span>
           {Object.entries(VIEW_COLORS).map(([k, c]) => (
-            <button key={k} className={`swatch ${color === k ? "on" : ""}`} style={{ background: c }} onClick={() => setColor(k)} aria-label={k} />
+            <button key={k} className={`swatch ${color === k ? "on" : ""}`} style={{ background: c }} onClick={() => setColor(k)} aria-label={`Цвет: ${COLOR_NAME[k] ?? k}`} aria-pressed={color === k} />
           ))}
         </div>
         <label className="row small"><input type="checkbox" checked={onDesk} onChange={(e) => setOnDesk(e.target.checked)} /> Выложить стопкой на «Стол»</label>
@@ -359,7 +376,7 @@ const LABEL: Record<string, string> = Object.fromEntries([
 export function ActiveChips() {
   const [sp, setSp] = useSearchParams();
   const fp = filterParams(sp);
-  const facets = useLoad(() => api<FacetsResp>(`/cases/facets${qs(fp)}`), [fp.toString()]);
+  const facets = useLoad(() => cachedApi<FacetsResp>(`/cases/facets${qs(fp)}`), [fp.toString()]);
   const entries: [string, string][] = [];
   fp.forEach((v, k) => entries.push([k, v]));
   if (!entries.length) return null;
