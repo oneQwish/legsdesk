@@ -243,6 +243,9 @@ def test_filters_facets_and_views(svc, lawyer, viewer):
     assert total("has_uid=false") == 1
     assert total("legal_entity=—") == 1                                # «не указано»
     assert total("building=401&has_conflicts=false") == 1
+    # судья: по любому источнику, без учёта регистра и «ё»; дело со спорным судьёй находится по обоим
+    assert total("judge=петров") == 2 and total("judge=сидоров") == 1 and total("judge=иванова") == 1
+    assert total("judge=петров&judge=иванова") == 3
 
     f = lawyer.get("/api/v1/cases/facets?building=401").json()
     assert f["total"] == 2
@@ -254,6 +257,8 @@ def test_filters_facets_and_views(svc, lawyer, viewer):
     r = lawyer.get("/api/v1/cases/facets?has_conflicts=true&sum_field=amount_debt&sum_min=1&deadline_kind=appeal&act_type=решение&overdue=true")
     assert r.status_code == 200, r.text
     assert {x["value"] for x in lawyer.get("/api/v1/cases/facets?has_conflicts=true").json()["facets"]["conflict_field"]} == {"judge"}
+    judges = {x["value"]: (x["label"], x["count"]) for x in lawyer.get("/api/v1/cases/facets").json()["facets"]["judge"]}
+    assert judges == {"петров": ("Петров", 2), "иванова": ("Иванова", 1), "сидоров": ("Сидоров", 1)}
 
     # конфликты и сроки понимают те же фильтры
     assert lawyer.get("/api/v1/conflicts?legal_entity=ГС-Саввино").json()["total"] == 0

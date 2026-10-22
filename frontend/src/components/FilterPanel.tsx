@@ -25,6 +25,7 @@ const FACETS: { key: string; label: string; chips?: boolean; open?: boolean }[] 
   { key: "complex", label: "ЖК", open: true },
   { key: "building", label: "Корпус", chips: true, open: true },
   { key: "court", label: "Суд", open: true },
+  { key: "judge", label: "Судья", open: true },
   { key: "year", label: "Год дела", chips: true, open: true },
   { key: "subject", label: "Предмет иска" },
   { key: "outcome", label: "Исход" },

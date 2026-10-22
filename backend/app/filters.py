@@ -17,7 +17,7 @@ from sqlalchemy.sql import ColumnElement
 
 from .fields import FIELDS
 from .logic import search_cases_filter
-from .models import Case, CaseValue, Deadline, Document
+from .models import Case, CaseValue, Deadline, Document, Observation
 
 DISPUTED = ("conflict", "appeal_possible")
 NONE = "—"  # значение фасета «не указано»
@@ -37,6 +37,7 @@ case_year = sa_case(
 # Подзапросы EXISTS — на отдельных псевдонимах таблиц и с явной корреляцией только с делом:
 # иначе при подсчёте фасета, где та же таблица присоединена снаружи, подзапрос теряет FROM.
 _cv, _dl, _doc = aliased(CaseValue), aliased(Deadline), aliased(Document)
+_jcv, _job = aliased(CaseValue), aliased(Observation)  # судья: поле + наблюдения источников
 
 
 def _ex(alias, *conds):
@@ -67,6 +68,7 @@ class CaseFilter:
     conflict_field: list[str] | None = None  # есть конфликт по полю
     deadline_kind: list[str] | None = None  # есть открытый срок вида
     act_type: list[str] | None = None       # есть документ вида
+    judge: list[str] | None = None          # судья по любому источнику (приведённое написание)
     has_uid: bool | None = None
     has_conflicts: bool | None = None
     appeal_flag: bool | None = None
@@ -99,6 +101,7 @@ class CaseFilter:
         conflict_field: list[str] | None = Query(None),
         deadline_kind: list[str] | None = Query(None),
         act_type: list[str] | None = Query(None),
+        judge: list[str] | None = Query(None),
         has_uid: bool | None = None,
         has_conflicts: bool | None = None,
         appeal_flag: bool | None = None,
@@ -145,6 +148,11 @@ class CaseFilter:
             c["conflict_field"] = _ex(_cv, _cv.case_id == Case.id, _cv.status.in_(DISPUTED), _cv.field.in_(self.conflict_field))
         if self.deadline_kind:
             c["deadline_kind"] = _ex(_dl, _dl.case_id == Case.id, _dl.status == "open", _dl.kind.in_(self.deadline_kind))
+        if self.judge:
+            # дело подходит, если хоть один источник называет этого судью (так находятся и дела со спорным судьёй)
+            c["judge"] = (select(literal(1)).select_from(_jcv).join(_job, _job.case_value_id == _jcv.id)
+                          .where(_jcv.case_id == Case.id, _jcv.field == "judge", _job.normalized.in_(self.judge))
+                          .correlate(Case).exists())
         if self.act_type:
             c["act_type"] = _ex(_doc, _doc.case_id == Case.id, _doc.act_type.in_(self.act_type))
         if self.has_uid is not None:
@@ -233,6 +241,10 @@ def facet_counts(db, f: CaseFilter, limit: int = 200) -> dict[str, list[dict]]:
         label=lambda r: DEADLINE_KIND_LABEL.get(r[0], r[0]))
     run("act_type", select(Document.act_type, func.count(func.distinct(Case.id))).select_from(Case)
         .join(Document, Document.case_id == Case.id))
+    run("judge", select(Observation.normalized, func.max(Observation.value), func.count(func.distinct(Case.id))).select_from(Case)
+        .join(CaseValue, and_(CaseValue.case_id == Case.id, CaseValue.field == "judge"))
+        .join(Observation, and_(Observation.case_value_id == CaseValue.id, Observation.normalized != "")),
+        label=lambda r: r[1])
     out["year"].sort(key=lambda x: x["value"], reverse=True)
     return out
 
