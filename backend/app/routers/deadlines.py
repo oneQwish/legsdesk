@@ -22,7 +22,7 @@ def list_deadlines(
     due_after: date | None = None,
     assignee: str = "",
     kind: str = "",
-    limit: int = Query(500, le=5000),
+    limit: int = Query(500, ge=1, le=5000),
     f: CaseFilter = Depends(CaseFilter.dep),
     db: Session = Depends(get_db),
     _: Principal = Depends(require(role="viewer", scope="read")),

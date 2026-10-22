@@ -140,7 +140,8 @@ def merge_cases(db: Session, who: Principal, target: Case, source: Case) -> None
         source.deadlines.remove(d)
         target.deadlines.append(d)
     if source.uid and source.uid != target.uid:
-        target.extra = {**target.extra, "other_uids": [*target.extra.get("other_uids", []), source.uid]}
+        other = target.extra.get("other_uids", [])
+        target.extra = {**target.extra, "other_uids": other if source.uid in other else [*other, source.uid]}
     db.flush()
     log(db, who, "case_merged", "case", target.id, target.id, merged_case_id=source.id, merged_uid=source.uid,
         merged_number=source.case_number)

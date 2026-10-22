@@ -12,6 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .. import deadlines as dl
+from ..config import get_settings
 from ..db import get_db
 from ..logic import add_observation, find_case, link_document, log, require_case, upsert_case
 from ..models import Case, Document
@@ -101,6 +102,19 @@ def ingest_documents(items: list[DocumentIn], db: Session = Depends(get_db), who
     return _batch(db, items, one)
 
 
+async def _read_limited(f: UploadFile) -> bytes:
+    """Прочитать файл, не больше LAWDESK_MAX_UPLOAD_MB (иначе 413 — без чтения остатка в память)."""
+    limit = get_settings().max_upload_mb * 1024 * 1024
+    buf = bytearray()
+    while chunk := await f.read(1024 * 1024):
+        buf += chunk
+        if len(buf) > limit:
+            raise HTTPException(413, f"Файл «{f.filename}» больше {get_settings().max_upload_mb} МБ")
+    if not buf:
+        raise HTTPException(400, f"Файл «{f.filename}» пустой")
+    return bytes(buf)
+
+
 @router.post("/documents/upload", response_model=DocumentResult)
 async def upload_document(
     file: UploadFile = File(...),
@@ -110,7 +124,7 @@ async def upload_document(
     who: Principal = Depends(require(role="lawyer", scope="ingest")),
 ):
     """Загрузить файл документа (PDF/ZIP-оригинал письма и т.п.) в хранилище и создать/обновить карточку."""
-    data = await file.read()
+    data = await _read_limited(file)
     sha = sha256_bytes(data)
     try:
         raw = json.loads(meta or "{}")
@@ -125,7 +139,7 @@ async def upload_document(
         ref = store.put(sha, data, d.filename, d.model_dump(mode="json", exclude={"text", "case"}))
         sig_ref = ""
         if signature is not None:
-            sig = await signature.read()
+            sig = await _read_limited(signature)
             sig_ref = store.put(sha256_bytes(sig), sig, (d.filename or sha) + ".sig", {"signature_for": sha})
     except StorageUnavailable as e:
         raise HTTPException(503, str(e)) from None

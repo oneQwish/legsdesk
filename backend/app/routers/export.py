@@ -9,6 +9,7 @@ from fastapi.responses import Response
 from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session, selectinload
 
+from .. import clock
 from ..db import get_db
 from ..fields import field_def
 from ..logic import log
@@ -58,7 +59,7 @@ def journal(
     action: str = "",
     case_id: int | None = None,
     page: int = Query(1, ge=1),
-    size: int = Query(100, le=1000),
+    size: int = Query(100, ge=1, le=1000),
     db: Session = Depends(get_db),
     _: Principal = Depends(require(role="viewer")),
 ):
@@ -92,7 +93,7 @@ def _rows(db: Session, statuses: list[str], since: date | None, fields: list[str
         others = ", ".join(a.number for a in c.aliases if a.number != c.case_number)
         yield [c.uid or "", c.court_code, c.court_name, c.case_number, others, c.legal_entity,
                field_def(v.field).label, v.field, v.value or "", STATUS_RU.get(v.status, v.status),
-               v.resolved_by or "", v.resolved_at.strftime("%d.%m.%Y %H:%M") if v.resolved_at else "", v.resolution_note]
+               v.resolved_by or "", clock.local(v.resolved_at).strftime("%d.%m.%Y %H:%M") if v.resolved_at else "", v.resolution_note]
 
 
 @router.get("/export/values")
@@ -106,7 +107,7 @@ def export_values(
 ):
     """Файл для загрузки во внешнюю систему (1С и др.): итоговые значения полей по делам (ключ — УИД, запасной — код суда + номер)."""
     rows = list(_rows(db, status.split(","), since, [f for f in fields.split(",") if f]))
-    stamp = datetime.now().strftime("%Y%m%d_%H%M")
+    stamp = clock.local(clock.now()).strftime("%Y%m%d_%H%M")
     log(db, who, "export", "case_value", None, format=format, status=status, rows=len(rows))
     db.commit()
     if format == "csv":

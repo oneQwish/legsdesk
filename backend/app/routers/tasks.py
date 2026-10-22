@@ -35,7 +35,7 @@ def create_task(body: TaskIn, db: Session = Depends(get_db), who: Principal = De
 
 
 @router.get("", response_model=Page[TaskOut])
-def list_tasks(status: str = "", type: str = "", page: int = Query(1, ge=1), size: int = Query(50, le=500),
+def list_tasks(status: str = "", type: str = "", page: int = Query(1, ge=1), size: int = Query(50, ge=1, le=500),
                db: Session = Depends(get_db), _: Principal = Depends(require(role="viewer", scope="tasks"))):
     stmt = select(Task)
     if status:

@@ -144,7 +144,7 @@ class Observation(Base):
     value: Mapped[str] = mapped_column(Text)
     normalized: Mapped[str] = mapped_column(Text)
     value_num: Mapped[Decimal | None] = mapped_column(Numeric(18, 2))
-    document_id: Mapped[int | None] = mapped_column(ForeignKey("documents.id", ondelete="SET NULL"))
+    document_id: Mapped[int | None] = mapped_column(ForeignKey("documents.id", ondelete="SET NULL"), index=True)
     page: Mapped[int | None] = mapped_column(Integer)
     quote: Mapped[str] = mapped_column(Text, default="")
     confidence: Mapped[float | None] = mapped_column()
@@ -208,6 +208,8 @@ class Deadline(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     case: Mapped[Case] = relationship(back_populates="deadlines")
     document: Mapped[Document | None] = relationship()
+    __table_args__ = (Index("ix_deadlines_case_status", "case_id", "status"),
+                      Index("ix_deadlines_status_due", "status", "due_date"))
 
 
 class CalendarDay(Base):
@@ -258,6 +260,12 @@ class Event(Base):
     # Номер в ленте изменений: присваивается при чтении ленты только видимым (зафиксированным) строкам,
     # поэтому порядок ленты = порядок фиксации, и событие из долгой транзакции не проскакивает мимо курсора.
     feed_seq: Mapped[int | None] = mapped_column(BigInteger, index=True, unique=True)
+
+    # те же индексы — в migrations/0001_indexes.sql для уже работающих баз
+    __table_args__ = (
+        Index("ix_events_unsequenced", "id", postgresql_where=feed_seq.is_(None)),
+        Index("ix_events_actor_action_ts", "actor", "action", "ts"),
+    )
 
 
 class SavedView(Base):

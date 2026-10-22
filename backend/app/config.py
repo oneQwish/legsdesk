@@ -37,6 +37,15 @@ class Settings(BaseSettings):
     # Очередь задач
     task_default_lease_seconds: int = 600
 
+    # Часовой пояс компании: от него считается «сегодня» для сроков и просрочек
+    timezone: str = "Europe/Moscow"
+
+    # Наибольший размер загружаемого файла документа, МБ (в nginx — client_max_body_size)
+    max_upload_mb: int = 200
+
+    # Защита входа: после стольких неудачных попыток подряд логин с этого адреса блокируется на 15 минут
+    login_max_failures: int = 5
+
 
 @lru_cache
 def get_settings() -> Settings:

@@ -50,7 +50,51 @@ class Principal:
 # --- LDAP --------------------------------------------------------------------------------------
 
 class AuthError(Exception):
-    pass
+    def __init__(self, message: str, unavailable: bool = False):
+        super().__init__(message)
+        self.unavailable = unavailable  # сбой связи, а не неверные данные — не считается попыткой перебора
+
+
+class LoginThrottle:
+    """Защита от перебора паролей: после N неудач подряд для пары (логин, адрес) вход закрыт на 15 минут.
+    Заодно бережёт учётные записи AD от блокировки чужими попытками. Хранится в памяти процесса."""
+
+    WINDOW = timedelta(minutes=15)
+
+    def __init__(self):
+        self._fails: dict[tuple[str, str], list[datetime]] = {}
+
+    def _recent(self, key: tuple[str, str]) -> list[datetime]:
+        edge = datetime.now(UTC) - self.WINDOW
+        recent = [t for t in self._fails.get(key, []) if t > edge]
+        if recent:
+            self._fails[key] = recent
+        else:
+            self._fails.pop(key, None)
+        return recent
+
+    def blocked_for(self, login: str, ip: str) -> int:
+        """Сколько минут ещё закрыт вход (0 — открыт)."""
+        recent = self._recent((login, ip))
+        if len(recent) < get_settings().login_max_failures:
+            return 0
+        left = recent[0] + self.WINDOW - datetime.now(UTC)
+        return max(1, int(left.total_seconds() // 60) + 1)
+
+    def failed(self, login: str, ip: str) -> None:
+        if len(self._fails) > 10_000:  # не копить память при массовом переборе с разных адресов
+            self._fails.clear()
+        self._fails.setdefault((login, ip), []).append(datetime.now(UTC))
+
+    def succeeded(self, login: str, ip: str) -> None:
+        self._fails.pop((login, ip), None)
+
+
+throttle = LoginThrottle()
+
+
+def normalize_login(login: str) -> str:
+    return login.strip().split("\\")[-1].split("@")[0].lower()
 
 
 def ldap_authenticate(login: str, password: str) -> tuple[str, str, str]:
@@ -63,19 +107,25 @@ def ldap_authenticate(login: str, password: str) -> tuple[str, str, str]:
         raise AuthError("Пустой пароль")
     sam = login.split("\\")[-1].split("@")[0]
     server = ldap3.Server(s.ldap_url, get_info=ldap3.NONE, connect_timeout=5)
+    exc = ldap3.core.exceptions
     try:
         conn = ldap3.Connection(server, user=f"{s.ldap_domain}\\{sam}", password=password,
                                 authentication=ldap3.NTLM if s.ldap_url.startswith("ldap://") else ldap3.SIMPLE,
-                                auto_bind=True, raise_exceptions=True)
-    except ldap3.core.exceptions.LDAPException as e:
+                                auto_bind=True, raise_exceptions=True, receive_timeout=10)
+    except (exc.LDAPSocketOpenError, exc.LDAPSocketReceiveError, exc.LDAPSessionTerminatedByServerError) as e:
+        # не путать с неверным паролем: иначе при недоступном контроллере «не пускает всех» без объяснения
+        raise AuthError("Контроллер домена недоступен — сообщите администратору", unavailable=True) from e
+    except exc.LDAPException as e:
         raise AuthError("Неверный логин или пароль") from e
-    conn.search(s.ldap_base_dn, f"(sAMAccountName={escape_filter_chars(sam)})",
-                attributes=["displayName", "mail", "memberOf"])
-    if not conn.entries:
-        raise AuthError("Учётная запись не найдена")
-    e = conn.entries[0]
-    groups = [str(g) for g in (e.memberOf.values if "memberOf" in e else [])]
-    conn.unbind()
+    try:
+        conn.search(s.ldap_base_dn, f"(sAMAccountName={escape_filter_chars(sam)})",
+                    attributes=["displayName", "mail", "memberOf"])
+        if not conn.entries:
+            raise AuthError("Учётная запись не найдена")
+        e = conn.entries[0]
+        groups = [str(g) for g in (e.memberOf.values if "memberOf" in e else [])]
+    finally:
+        conn.unbind()
 
     def member(cn: str) -> bool:
         return any(g.upper().startswith(cn.upper() + ",") or g.upper() == cn.upper() for g in groups)
@@ -95,7 +145,7 @@ def ldap_authenticate(login: str, password: str) -> tuple[str, str, str]:
 
 def authenticate(db: Session, login: str, password: str) -> User:
     s = get_settings()
-    login = login.strip().split("\\")[-1].split("@")[0].lower()
+    login = normalize_login(login)
     if not login:
         raise AuthError("Пустой логин")
     if s.auth_mode == "dev":

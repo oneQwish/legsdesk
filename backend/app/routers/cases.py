@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import case as sa_case, func, select
 from sqlalchemy.orm import Session, selectinload
 
-from .. import deadlines as dl
+from .. import clock, deadlines as dl
 from ..db import get_db
 from ..fields import FIELDS, field_def
 from ..filters import CaseFilter, facet_counts, flags, money
@@ -73,7 +73,7 @@ def list_cases(
     stmt = select(Case, conflicts_sq.label("conflicts"), open_dl_sq.label("open_dl"), next_due_sq.label("next_due"),
                   next_title_sq.label("next_title"), awarded_sq.label("awarded"),
                   claimed_sq.label("claimed")).where(*f.where())
-    total = db.scalar(select(func.count()).select_from(stmt.subquery()))
+    total = db.scalar(select(func.count(Case.id)).where(*f.where()))  # без подзапросов колонок — быстрее
     key = sort.lstrip("-")
     col = {"updated_at": Case.updated_at, "case_number": Case.case_number, "id": Case.id,
            "conflicts": conflicts_sq, "next_due": next_due_sq}[key]
@@ -142,7 +142,14 @@ def merge(case_id: int, other_id: int, db: Session = Depends(get_db), who: Princ
 
 @router.get("/cases/{case_id}/events", response_model=list[EventOut])
 def case_events(case_id: int, db: Session = Depends(get_db), _: Principal = Depends(require(role="viewer", scope="read"))):
-    return db.scalars(select(Event).where(Event.case_id == case_id).order_by(Event.id.desc()).limit(500)).all()
+    """История дела, включая историю слитых в него дублей."""
+    ids, frontier = {case_id}, [case_id]
+    while frontier:  # слияния могут быть цепочкой: C ← B ← A
+        merged = db.scalars(select(Event.data["merged_case_id"].as_integer()).where(
+            Event.action == "case_merged", Event.case_id.in_(frontier))).all()
+        frontier = [m for m in merged if m is not None and m not in ids]
+        ids.update(frontier)
+    return db.scalars(select(Event).where(Event.case_id.in_(ids)).order_by(Event.id.desc()).limit(500)).all()
 
 
 @router.post("/cases/{case_id}/deadlines", response_model=DeadlineOut)
@@ -170,9 +177,9 @@ def recalc(case_id: int, db: Session = Depends(get_db), who: Principal = Depends
 
 @router.get("/stats")
 def stats(db: Session = Depends(get_db), _: Principal = Depends(require(role="viewer", scope="read"))):
-    from datetime import date, timedelta
+    from datetime import timedelta
 
-    today = date.today()
+    today = clock.today()
     by_status = dict(db.execute(select(CaseValue.status, func.count()).group_by(CaseValue.status)).all())
     dl_counts = db.execute(select(
         func.count(sa_case((Deadline.due_date < today, 1))),

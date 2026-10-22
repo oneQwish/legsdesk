@@ -15,6 +15,11 @@ from ..logic import require_case
 
 router = APIRouter(prefix="/api/v1/documents", tags=["Документы"])
 
+# Что браузер может показать прямо на странице. Остальное (в том числе HTML и SVG, присланные сервисом
+# или пользователем) отдаётся только на скачивание: иначе файл со скриптом выполнился бы от имени юриста.
+INLINE_MIME = {"application/pdf", "image/png", "image/jpeg", "image/gif", "image/webp", "image/tiff",
+               "text/plain"}
+
 
 @router.get("", response_model=Page[DocumentBrief])
 def list_documents(
@@ -79,7 +84,12 @@ def get_file(doc_id: int, signature: bool = False, db: Session = Depends(get_db)
         name, mime = name.rsplit(".", 1)[0] + ".sig", "application/pkcs7-signature"
     else:
         mime = d.mime
-    headers = {"Content-Disposition": f"inline; filename*=UTF-8''{quote(name)}", "Cache-Control": "private, max-age=3600"}
+    mime = (mime or "application/octet-stream").split(";")[0].strip().lower()
+    inline = mime in INLINE_MIME
+    headers = {"Content-Disposition": f"{'inline' if inline else 'attachment'}; filename*=UTF-8''{quote(name)}",
+               "Cache-Control": "private, max-age=3600", "X-Content-Type-Options": "nosniff"}
+    if mime != "application/pdf":  # встроенный просмотрщик PDF в Chrome не работает в песочнице
+        headers["Content-Security-Policy"] = "sandbox; default-src 'none'; img-src 'self'; style-src 'unsafe-inline'"
     log(db, who, "document_viewed", "document", d.id, d.case_id, signature=signature)
     db.commit()
     if isinstance(data, bytes):

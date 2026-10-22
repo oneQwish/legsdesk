@@ -15,6 +15,7 @@ from sqlalchemy import Date, Numeric, and_, case as sa_case, cast, func, literal
 from sqlalchemy.orm import aliased
 from sqlalchemy.sql import ColumnElement
 
+from . import clock
 from .fields import FIELDS
 from .logic import search_cases_filter
 from .models import Case, CaseValue, Deadline, Document, Observation
@@ -166,7 +167,7 @@ class CaseFilter:
             e = _ex(_doc, _doc.case_id == Case.id)
             c["has_documents"] = e if self.has_documents else ~e
         if self.overdue:
-            c["overdue"] = _ex(_dl, _dl.case_id == Case.id, _dl.status == "open", _dl.due_date < func.current_date())
+            c["overdue"] = _ex(_dl, _dl.case_id == Case.id, _dl.status == "open", _dl.due_date < clock.today())
         if self.due_from or self.due_to:
             parts = []
             if self.due_from:
@@ -256,7 +257,7 @@ def flags(db, f: CaseFilter) -> dict[str, dict[str, int]]:
 
     conf = _ex(_cv, _cv.case_id == Case.id, _cv.status.in_(DISPUTED))
     docs = _ex(_doc, _doc.case_id == Case.id)
-    od = _ex(_dl, _dl.case_id == Case.id, _dl.status == "open", _dl.due_date < func.current_date())
+    od = _ex(_dl, _dl.case_id == Case.id, _dl.status == "open", _dl.due_date < clock.today())
     return {
         "has_uid": {"true": count("has_uid", Case.uid.is_not(None)), "false": count("has_uid", Case.uid.is_(None))},
         "has_conflicts": {"true": count("has_conflicts", conf), "false": count("has_conflicts", ~conf)},

@@ -6,7 +6,7 @@ from fastapi import APIRouter
 from sqlalchemy import cast, func, select, Date
 from sqlalchemy.orm import Session
 
-from .. import deadlines as dl
+from .. import clock, deadlines as dl
 from ..db import get_db
 from ..filters import CaseFilter
 from ..models import Case, Deadline, Event, User
@@ -24,7 +24,7 @@ def day_strip(
 ):
     """Лента дней от сегодня: открытые сроки по видам и признак рабочего дня (календарь 1С или запасной).
     Первая ячейка «просрочено» — все открытые сроки до сегодня."""
-    today = date.today()
+    today = clock.today()
     end = today + timedelta(days=days - 1)
     rows = db.execute(
         select(Deadline.due_date, Deadline.kind, func.count())
@@ -60,7 +60,8 @@ def my_progress(db: Session = Depends(get_db), who: Principal = Depends(require(
     Срыв серии — день, когда открытый срок стал просроченным (сегодняшняя просрочка или срок,
     закрытый позже даты)."""
     now = datetime.now(UTC)
-    this_start = datetime.combine(_week_start(now.date()), datetime.min.time(), UTC)
+    # неделя — с понедельника по местному времени компании
+    this_start = datetime.combine(_week_start(clock.today()), datetime.min.time(), clock.tz())
     last_start = this_start - timedelta(days=7)
 
     def count(action: str, start: datetime, end: datetime, data_filter=None) -> int:
@@ -82,7 +83,7 @@ def my_progress(db: Session = Depends(get_db), who: Principal = Depends(require(
     mine = select(Case.id).where(Case.responsible == who.name)
     scope_mine = db.scalar(select(func.count()).select_from(mine.subquery())) > 0
     case_scope = Deadline.case_id.in_(mine) if scope_mine else True
-    today = date.today()
+    today = clock.today()
     overdue_now = db.scalar(select(func.count(Deadline.id)).where(case_scope, Deadline.status == "open",
                                                                   Deadline.due_date < today)) or 0
     if overdue_now:
