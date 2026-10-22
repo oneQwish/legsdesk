@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
-import { useSession } from "../App";
+import { Topbar, useSession } from "../App";
+import { PromptModal, useToast } from "../components/overlay";
 import { api, fmtDate, type DocumentFull } from "../api";
 import { ErrorBox, StatusBadge, useLoad } from "../components/ui";
 
@@ -13,6 +14,8 @@ export default function DocumentPage() {
   const doc = useLoad(() => api<DocumentFull>(`/documents/${id}`), [id]);
   const extracted = useLoad(() => api<Extracted[]>(`/documents/${id}/observations`), [id]);
   const [find, setFind] = useState("");
+  const [linking, setLinking] = useState(false);
+  const toast = useToast();
   const d = doc.data;
 
   const highlighted = useMemo(() => {
@@ -26,34 +29,20 @@ export default function DocumentPage() {
   const page = sp.get("page");
   const hasFile = Boolean(d.storage_backend && d.storage_backend !== "external");
 
-  const link = async () => {
-    const v = prompt("ID дела, к которому привязать документ (пусто — отвязать):", d.case_id ? String(d.case_id) : "");
-    if (v === null) return;
-    try {
-      await api(`/documents/${d.id}/link`, { method: "POST", json: v ? { case_id: Number(v) } : {} });
-      doc.reload();
-    } catch (e) {
-      alert((e as Error).message);
-    }
-  };
 
   return (
     <>
-      <div className="page-head">
-        <div className="grow">
-          <div className="muted small">
-            <Link to="/documents">Документы</Link> / #{d.id}
-            {d.case_id && <> · <Link to={`/cases/${d.case_id}`}>дело #{d.case_id}</Link></>}
-          </div>
-          <h1>{d.act_type || d.kind} {d.act_date && `от ${fmtDate(d.act_date)}`}</h1>
-          <div className="muted small">{d.filename} · <span className="mono">{d.sha256}</span></div>
-        </div>
+      <Topbar
+        title={<><span className="muted small" style={{ fontFamily: "var(--sans)", fontWeight: 400, display: "block" }}>
+          <Link to="/documents">Документы</Link> / #{d.id}{d.case_id && <> · <Link to={`/cases/${d.case_id}`}>дело #{d.case_id}</Link></>}
+        </span>{d.act_type || d.kind} {d.act_date && `от ${fmtDate(d.act_date)}`}</>}
+        sub={<>{d.filename} · <span className="mono">{d.sha256.slice(0, 16)}…</span></>}>
         <div className="row">
           {hasFile && <a className="btn" href={`/api/v1/documents/${d.id}/file`} target="_blank" rel="noreferrer">Открыть файл</a>}
           {d.signature_ref && <a className="btn" href={`/api/v1/documents/${d.id}/file?signature=true`}>Подпись .sig</a>}
-          {can("lawyer") && <button onClick={link}>{d.case_id ? "Перепривязать" : "Привязать к делу"}</button>}
+          {can("lawyer") && <button onClick={() => setLinking(true)}>{d.case_id ? "Перепривязать" : "Привязать к делу"}</button>}
         </div>
-      </div>
+      </Topbar>
       <div className="viewer">
         {hasFile ? (
           <iframe title="Документ" src={`/api/v1/documents/${d.id}/file${page ? `#page=${page}` : ""}`} />
@@ -105,6 +94,16 @@ export default function DocumentPage() {
           </div>
         </div>
       </div>
+      {linking && (
+        <PromptModal title="Привязать документ к делу" label="ID дела (пусто — отвязать)" type="number"
+          initial={d.case_id ? String(d.case_id) : ""} onClose={() => setLinking(false)}
+          hint="ID дела видно в адресе карточки дела. Сроки обоих дел пересчитаются автоматически."
+          onSubmit={async (v) => {
+            await api(`/documents/${d.id}/link`, { method: "POST", json: v ? { case_id: Number(v) } : {} });
+            doc.reload();
+            toast(v ? `Документ привязан к делу #${v}` : "Документ отвязан");
+          }} />
+      )}
     </>
   );
 }

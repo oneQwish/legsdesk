@@ -223,6 +223,7 @@ class CaseBrief(ORM):
     conflicts: int = 0
     open_deadlines: int = 0
     next_due: date | None = None
+    next_title: str | None = None
 
 
 class CaseOut(CaseBrief):

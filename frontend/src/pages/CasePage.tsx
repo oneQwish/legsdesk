@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { useSession } from "../App";
-import { ACTION_LABEL, api, fmtDate, fmtDateTime, fmtValue, type CaseFull, type CaseValue, type Deadline, type EventItem } from "../api";
+import { Topbar, useSession } from "../App";
+import { ACTION_LABEL, api, fmtDate, fmtDateTime, fmtValue, shortCourt, type CaseFull, type CaseValue, type Deadline, type EventItem } from "../api";
 import ResolvePanel, { ObservationLine } from "../components/ResolvePanel";
+import { PromptModal, useToast } from "../components/overlay";
 import { DueBadge, ErrorBox, StatusBadge, useLoad } from "../components/ui";
 
 type Tab = "values" | "documents" | "deadlines" | "journal";
@@ -12,6 +13,8 @@ export default function CasePage() {
   const { can, refreshStats } = useSession();
   const nav = useNavigate();
   const [tab, setTab] = useState<Tab>("values");
+  const [dialog, setDialog] = useState<"" | "responsible" | "merge">("");
+  const toast = useToast();
   const c = useLoad(() => api<CaseFull>(`/cases/${id}`), [id]);
   const data = c.data;
 
@@ -21,46 +24,24 @@ export default function CasePage() {
   const replaceValue = (v: CaseValue) => {
     c.setData({ ...data, values: data.values.map((x) => (x.id === v.id ? v : x)) });
     refreshStats();
+    toast(v.status === "resolved" ? `${v.label}: принято ${fmtValue(v.kind, v.value)}` : `${v.label}: решение отменено`);
   };
 
   const conflicts = data.values.filter((v) => v.status === "conflict" || v.status === "appeal_possible").length;
   const openDl = data.deadlines.filter((d) => d.status === "open").length;
 
-  const setResponsible = async () => {
-    const r = prompt("Ответственный юрист (логин или ФИО):", data.responsible);
-    if (r === null) return;
-    await api(`/cases/${data.id}`, { method: "PATCH", json: { responsible: r } });
-    c.reload();
-  };
-  const merge = async () => {
-    const other = prompt("ID дела-дубля, которое нужно влить в это дело (номера, значения, документы и сроки перейдут сюда):");
-    if (!other) return;
-    try {
-      await api(`/cases/${data.id}/merge/${Number(other)}`, { method: "POST" });
-      c.reload();
-    } catch (e) {
-      alert((e as Error).message);
-    }
-  };
-
   return (
     <>
-      <div className="page-head">
-        <div className="grow">
-          <div className="muted small"><Link to="/cases">Дела</Link> / #{data.id}</div>
-          <h1>Дело {data.case_number || "без номера"}</h1>
-          <div className="muted">
-            {data.court_name}
-            {data.uid ? <> · УИД <span className="mono">{data.uid}</span></> : <> · <span className="badge appeal_possible">УИД нет</span></>}
-          </div>
-        </div>
+      <Topbar
+        title={<><span className="muted small" style={{ fontFamily: "var(--sans)", fontWeight: 400, display: "block" }}><Link to="/cases">Дела</Link> / #{data.id}</span>Дело № {data.case_number || "без номера"}</>}
+        sub={<span title={data.court_name}>{shortCourt(data.court_name)}{data.uid ? <> · УИД <span className="mono">{data.uid}</span></> : <> · <span className="badge appeal_possible">УИД нет</span></>}</span>}>
         {can("lawyer") && (
           <div className="row">
-            <button onClick={setResponsible}>Ответственный</button>
-            <button onClick={merge}>Слить дубль…</button>
+            <button onClick={() => setDialog("responsible")}>Ответственный</button>
+            <button onClick={() => setDialog("merge")}>Слить дубль…</button>
           </div>
         )}
-      </div>
+      </Topbar>
 
       <div className="panel pad" style={{ marginBottom: 14 }}>
         <div className="facts">
@@ -116,6 +97,24 @@ export default function CasePage() {
       )}
       {tab === "deadlines" && <DeadlinesTab caseId={data.id} deadlines={data.deadlines} reload={c.reload} />}
       {tab === "journal" && <JournalTab caseId={data.id} />}
+
+      {dialog === "responsible" && (
+        <PromptModal title="Ответственный юрист" label="Логин или ФИО" initial={data.responsible} onClose={() => setDialog("")}
+          onSubmit={async (v) => {
+            await api(`/cases/${data.id}`, { method: "PATCH", json: { responsible: v } });
+            c.reload();
+            toast("Ответственный назначен");
+          }} />
+      )}
+      {dialog === "merge" && (
+        <PromptModal title="Слить дубль в это дело" label="ID дела-дубля" type="number" okText="Слить" onClose={() => setDialog("")}
+          hint="Номера, значения источников, документы и сроки дубля перейдут в это дело, дубль будет удалён. Действие пишется в журнал."
+          onSubmit={async (v) => {
+            await api(`/cases/${data.id}/merge/${Number(v)}`, { method: "POST" });
+            c.reload();
+            toast(`Дело #${v} слито`);
+          }} />
+      )}
     </>
   );
 }
@@ -124,8 +123,27 @@ function ValuesTab({ values, onChange }: { values: CaseValue[]; onChange: (v: Ca
   const [open, setOpen] = useState<number | null>(values.find((v) => v.status === "conflict" || v.status === "appeal_possible")?.id ?? null);
   const groups = [...new Set(values.map((v) => v.group))];
   if (values.length === 0) return <div className="panel empty-state">Источники ещё не прислали значений по этому делу</div>;
+  const money = values.filter((v) => v.kind === "money" && v.field !== "claim_total");
+  const disputed = (v: CaseValue) => v.status === "conflict" || v.status === "appeal_possible";
+  const num = (v: CaseValue) => Number(String(v.value ?? "").replace(/[^\d.,-]/g, "").replace(",", "."));
+  const total = money.filter((v) => !disputed(v) && v.value).reduce((a, v) => a + (num(v) || 0), 0);
+  const anyDisputed = money.some(disputed);
   return (
     <div className="stack">
+      {money.length > 0 && (
+        <div className="sums">
+          {money.map((v) => (
+            <div key={v.id} className={disputed(v) ? "disputed" : ""} style={{ cursor: "pointer" }} onClick={() => setOpen(v.id)}>
+              <div className="l">{v.label}</div>
+              <div className="v">{disputed(v) ? "расходятся ↓" : fmtValue(v.kind, v.value)}</div>
+            </div>
+          ))}
+          <div className="total">
+            <div className="l">Взыскано всего{anyDisputed && " (без спорных)"}</div>
+            <div className="v">{fmtValue("money", String(total))}</div>
+          </div>
+        </div>
+      )}
       {groups.map((g) => (
         <div key={g}>
           <div className="group-title">{g}</div>
@@ -174,10 +192,13 @@ function DeadlinesTab({ caseId, deadlines, reload }: { caseId: number; deadlines
   const [title, setTitle] = useState("");
   const [due, setDue] = useState("");
   const [err, setErr] = useState("");
+  const [editing, setEditing] = useState<Deadline | null>(null);
+  const toast = useToast();
   const patch = async (d: Deadline, body: Partial<Deadline>) => {
     await api(`/deadlines/${d.id}`, { method: "PATCH", json: body });
     reload();
     refreshStats();
+    if (body.status === "done") toast(`«${d.title}» — выполнено`);
   };
   const add = async () => {
     try {
@@ -210,8 +231,8 @@ function DeadlinesTab({ caseId, deadlines, reload }: { caseId: number; deadlines
                   {d.title}
                   {d.document_id && <div className="small"><Link to={`/documents/${d.document_id}`}>акт</Link></div>}
                 </td>
-                <td className="small" style={{ whiteSpace: "pre-wrap", maxWidth: 420 }}>
-                  {d.rule}
+                <td className="small" style={{ maxWidth: 420 }}>
+                  <details className="rule"><summary>{d.rule.split(":")[0]}</summary><div>{d.rule}</div></details>
                   {!d.calendar_confirmed && <div className="notice small" style={{ marginTop: 4 }}>Календарь года не загружен из 1С — переносы праздников не учтены</div>}
                   {d.note && <div className="muted">{d.note}</div>}
                 </td>
@@ -220,10 +241,7 @@ function DeadlinesTab({ caseId, deadlines, reload }: { caseId: number; deadlines
                   {can("lawyer") && d.status === "open" && (
                     <>
                       <button onClick={() => patch(d, { status: "done" })}>Выполнено</button>{" "}
-                      <button onClick={() => {
-                        const v = prompt("Новая дата (ГГГГ-ММ-ДД). После правки срок не пересчитывается автоматически.", d.due_date);
-                        if (v) patch(d, { due_date: v });
-                      }}>Дата…</button>
+                      <button onClick={() => setEditing(d)}>Дата…</button>
                     </>
                   )}
                   {can("lawyer") && d.status !== "open" && <button onClick={() => patch(d, { status: "open" })}>Вернуть</button>}
@@ -242,6 +260,15 @@ function DeadlinesTab({ caseId, deadlines, reload }: { caseId: number; deadlines
           <button onClick={recalc} title="Пересчитать автоматические сроки по актам дела">Пересчитать</button>
           {err && <div className="error">{err}</div>}
         </div>
+      )}
+      {editing && (
+        <PromptModal title={`Изменить срок: ${editing.title}`} label="Новая дата" type="date" initial={editing.due_date}
+          hint="После ручной правки срок больше не пересчитывается автоматически (например, при загрузке календаря из 1С)."
+          onClose={() => setEditing(null)}
+          onSubmit={async (v) => {
+            await patch(editing, { due_date: v });
+            toast("Дата срока изменена");
+          }} />
       )}
     </div>
   );

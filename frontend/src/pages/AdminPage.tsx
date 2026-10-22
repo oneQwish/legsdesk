@@ -1,3 +1,4 @@
+import { Topbar } from "../App";
 import { useState } from "react";
 import { api, fmtDateTime, type Page, type Service, type Task } from "../api";
 import { ErrorBox, useLoad } from "../components/ui";
@@ -8,12 +9,7 @@ export default function AdminPage() {
   const [tab, setTab] = useState<Tab>("services");
   return (
     <>
-      <div className="page-head">
-        <div className="grow">
-          <h1>Сервисы и API</h1>
-          <div className="muted">Подключение сервисов системы автоматизации, очередь задач, выгрузка для 1С. Документация API — <a href="/api/docs" target="_blank" rel="noreferrer">/api/docs</a>.</div>
-        </div>
-      </div>
+      <Topbar title="Сервисы и API" sub="Подключение сервисов автоматизации, очередь задач, выгрузка для 1С." />
       <div className="tabs">
         <button className={tab === "services" ? "on" : ""} onClick={() => setTab("services")}>Сервисы и ключи</button>
         <button className={tab === "tasks" ? "on" : ""} onClick={() => setTab("tasks")}>Очередь задач</button>

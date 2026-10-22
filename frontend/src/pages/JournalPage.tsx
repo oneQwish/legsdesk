@@ -1,3 +1,4 @@
+import { Topbar } from "../App";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { ACTION_LABEL, api, fmtDateTime, qs, type EventItem, type Page } from "../api";
@@ -11,17 +12,13 @@ export default function JournalPage() {
   const list = useLoad(() => api<Page<EventItem>>(`/journal${qs({ action, actor, page, size: 100 })}`), [action, actor, page]);
   return (
     <>
-      <div className="page-head">
-        <div className="grow">
-          <h1>Журнал</h1>
-          <div className="muted">Все действия людей и сервисов. Решения юристов отсюда уходят в ленту изменений для 1С.</div>
-        </div>
-        <input placeholder="Кто (логин/сервис)" value={actor} onChange={(e) => { setActor(e.target.value); setPage(1); }} />
-        <select value={action} onChange={(e) => { setAction(e.target.value); setPage(1); }}>
-          <option value="">Все действия</option>
-          {Object.entries(ACTION_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-        </select>
-      </div>
+      <Topbar title="Журнал" sub="Все действия людей и сервисов; решения юристов уходят отсюда в ленту для 1С.">
+      <input placeholder="Кто (логин/сервис)" value={actor} onChange={(e) => { setActor(e.target.value); setPage(1); }} />
+      <select value={action} onChange={(e) => { setAction(e.target.value); setPage(1); }}>
+        <option value="">Все действия</option>
+        {Object.entries(ACTION_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+      </select>
+      </Topbar>
       <ErrorBox error={list.error} />
       <div className="panel">
         <div className="table-wrap">

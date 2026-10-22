@@ -1,16 +1,39 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { api, fmtDate, qs, type CaseBrief, type Page } from "../api";
+import { Topbar } from "../App";
+import { api, fmtDate, qs, shortCourt, type CaseBrief, type Page } from "../api";
+import CaseCard, { caseTone } from "../components/CaseCard";
+import { Icon } from "../components/icons";
 import { DueBadge, ErrorBox, Pager, useLoad } from "../components/ui";
 
 type Facets = { legal_entity: string[]; stage: string[]; responsible: string[]; building: string[] };
+type Mode = "cards" | "table";
+
+function savedMode(): Mode {
+  try {
+    return (localStorage.getItem("lawdesk.cases.mode") as Mode) || "cards";
+  } catch {
+    return "cards";
+  }
+}
 
 export default function CasesPage() {
   const nav = useNavigate();
   const [sp, setSp] = useSearchParams();
   const [q, setQ] = useState(sp.get("q") ?? "");
+  const [mode, setModeState] = useState<Mode>(savedMode);
   const params = Object.fromEntries(sp.entries());
   const page = Number(params.page ?? 1);
+  const size = mode === "cards" ? 24 : 50;
+
+  const setMode = (m: Mode) => {
+    setModeState(m);
+    try {
+      localStorage.setItem("lawdesk.cases.mode", m);
+    } catch {
+      /* без сохранения — не страшно */
+    }
+  };
 
   const set = (patch: Record<string, string>) => {
     const next = { ...params, ...patch };
@@ -25,18 +48,18 @@ export default function CasesPage() {
   }, [q]);
 
   const facets = useLoad(() => api<Facets>("/cases/facets"), []);
-  const list = useLoad(() => api<Page<CaseBrief>>(`/cases${qs({ ...params, size: 50 })}`), [sp.toString()]);
+  const list = useLoad(() => api<Page<CaseBrief>>(`/cases${qs({ ...params, size })}`), [sp.toString(), size]);
 
   return (
     <>
-      <div className="page-head">
-        <div className="grow">
-          <h1>Дела</h1>
-          <div className="muted">Поиск по УИД, номеру (включая М-, прежние и 33-/88-), истцу, договору, суду</div>
+      <Topbar title="Дела" sub={list.data ? `${list.data.total} дел` : " "}>
+        <div className="seg" role="tablist" aria-label="Вид">
+          <button className={mode === "cards" ? "on" : ""} onClick={() => setMode("cards")}><Icon name="spread" size={14} /> Карточки</button>
+          <button className={mode === "table" ? "on" : ""} onClick={() => setMode("table")}><Icon name="table" size={14} /> Таблица</button>
         </div>
-      </div>
-      <div className="panel pad row" style={{ marginBottom: 12 }}>
-        <input className="grow" placeholder="Поиск…" value={q} onChange={(e) => setQ(e.target.value)} style={{ minWidth: 220 }} />
+      </Topbar>
+      <div className="filters">
+        <input className="q" placeholder="УИД, номер (2-…, М-…, 33-…), истец, договор, суд" value={q} onChange={(e) => setQ(e.target.value)} />
         <select value={params.legal_entity ?? ""} onChange={(e) => set({ legal_entity: e.target.value })}>
           <option value="">Все юрлица</option>
           {facets.data?.legal_entity.map((x) => <option key={x}>{x}</option>)}
@@ -63,46 +86,55 @@ export default function CasesPage() {
         </select>
       </div>
       <ErrorBox error={list.error} />
-      <div className="panel">
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Номер / УИД</th>
-                <th>Суд</th>
-                <th>Истцы</th>
-                <th>Объект</th>
-                <th>Юрлицо</th>
-                <th>Конфликты</th>
-                <th>Ближайший срок</th>
-              </tr>
-            </thead>
-            <tbody>
-              {list.data?.items.map((c) => (
-                <tr key={c.id} className="clickable" onClick={() => nav(`/cases/${c.id}`)}>
-                  <td>
-                    <b className="nowrap">{c.case_number || "без номера"}</b>
-                    <div className="mono muted">{c.uid ?? "УИД нет"}</div>
-                  </td>
-                  <td className="small">{c.court_name}</td>
-                  <td>{c.plaintiffs || <span className="muted">—</span>}</td>
-                  <td className="nowrap small">
-                    {c.complex}
-                    {c.building && <div className="muted">корп. {c.building}{c.flat && `, кв. ${c.flat}`}</div>}
-                  </td>
-                  <td className="small">{c.legal_entity}</td>
-                  <td>{c.conflicts > 0 ? <span className="badge conflict">{c.conflicts}</span> : <span className="muted">—</span>}</td>
-                  <td className="nowrap">
-                    {c.next_due ? (<>{fmtDate(c.next_due)} <DueBadge due={c.next_due} /></>) : <span className="muted">—</span>}
-                  </td>
+
+      {mode === "cards" ? (
+        <>
+          <div className="cards-grid">
+            {list.data?.items.map((c) => <CaseCard key={c.id} c={c} />)}
+          </div>
+          {list.data?.items.length === 0 && <div className="panel empty-state">Ничего не найдено</div>}
+        </>
+      ) : (
+        <div className="panel">
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th style={{ width: 4, padding: 0 }}></th>
+                  <th>Дело</th>
+                  <th>Истцы</th>
+                  <th>Суд</th>
+                  <th>Объект</th>
+                  <th>Юрлицо</th>
+                  <th className="right">Конфл.</th>
+                  <th>Ближайший срок</th>
                 </tr>
-              ))}
-              {list.data?.items.length === 0 && <tr><td colSpan={7} className="empty-state">Ничего не найдено</td></tr>}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {list.data?.items.map((c) => (
+                  <tr key={c.id} className={`clickable ${caseTone(c)}`} onClick={() => nav(`/cases/${c.id}`)}>
+                    <td style={{ padding: 0, background: "var(--tone)" }}></td>
+                    <td className="nowrap">
+                      <b className="serif" style={{ fontSize: 15 }}>{c.case_number || "без номера"}</b>
+                      <span className="mono muted" style={{ marginLeft: 8 }}>{c.uid ?? "нет УИД"}</span>
+                    </td>
+                    <td className="ellipsis" style={{ maxWidth: 260 }} title={c.plaintiffs}>{c.plaintiffs || <span className="muted">—</span>}</td>
+                    <td className="nowrap small" title={c.court_name}>{shortCourt(c.court_name)}</td>
+                    <td className="nowrap small">{c.building ? `корп. ${c.building}, кв. ${c.flat}` : "—"}</td>
+                    <td className="nowrap small">{c.legal_entity}</td>
+                    <td className="right">{c.conflicts > 0 ? <span className="badge conflict">{c.conflicts}</span> : <span className="muted">·</span>}</td>
+                    <td className="nowrap small">
+                      {c.next_due ? (<>{fmtDate(c.next_due)} <DueBadge due={c.next_due} /> <span className="muted">{c.next_title}</span></>) : <span className="muted">—</span>}
+                    </td>
+                  </tr>
+                ))}
+                {list.data?.items.length === 0 && <tr><td colSpan={8} className="empty-state">Ничего не найдено</td></tr>}
+              </tbody>
+            </table>
+          </div>
         </div>
-        {list.data && <Pager page={page} size={list.data.size} total={list.data.total} onPage={(p) => set({ page: String(p) })} />}
-      </div>
+      )}
+      {list.data && <Pager page={page} size={list.data.size} total={list.data.total} onPage={(p) => set({ page: String(p) })} />}
     </>
   );
 }

@@ -1,3 +1,4 @@
+import { Topbar } from "../App";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { api, fmtDate, qs, type DocumentBrief, type Page } from "../api";
 import { ErrorBox, Pager, useLoad } from "../components/ui";
@@ -17,12 +18,7 @@ export default function DocumentsPage() {
 
   return (
     <>
-      <div className="page-head">
-        <div className="grow">
-          <h1>Документы</h1>
-          <div className="muted">Сканы, цифровые оригиналы писем Почты России, иски, акты. Файлы — в хранилище (1С:Документооборот после подключения).</div>
-        </div>
-      </div>
+      <Topbar title="Документы" sub="Сканы, цифровые оригиналы писем, иски и акты." />
       <div className="panel pad row" style={{ marginBottom: 12 }}>
         <input className="grow" placeholder="Имя файла, трек-номер или sha256" defaultValue={params.q ?? ""}
                onKeyDown={(e) => e.key === "Enter" && set({ q: (e.target as HTMLInputElement).value })} />

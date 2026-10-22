@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { useSession } from "../App";
+import { Topbar, useSession } from "../App";
 import { api, daysLeft, fmtDate, qs, type Deadline } from "../api";
 import { DueBadge, ErrorBox, useLoad } from "../components/ui";
 
@@ -39,23 +39,17 @@ export default function DeadlinesPage() {
 
   return (
     <>
-      <div className="page-head">
-        <div className="grow">
-          <h1>Процессуальные сроки</h1>
-          <div className="muted">
-            Считаются по ГПК РФ из актов дела (ст. 107–108, 209, 237, 321, 332, 376.1) по производственному календарю из 1С. «*» — год календаря не загружен.
-          </div>
-        </div>
-        <select value={kind} onChange={(e) => setKind(e.target.value)}>
-          <option value="">Все виды</option>
-          {Object.entries(KIND_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-        </select>
-        <select value={status} onChange={(e) => setStatus(e.target.value)}>
-          <option value="open">Открытые</option>
-          <option value="done">Выполненные</option>
-          <option value="cancelled">Снятые</option>
-        </select>
-      </div>
+      <Topbar title="Сроки" sub="По ГПК РФ из актов дела и производственному календарю 1С. «*» — календарь года не загружен.">
+      <select value={kind} onChange={(e) => setKind(e.target.value)}>
+        <option value="">Все виды</option>
+        {Object.entries(KIND_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+      </select>
+      <select value={status} onChange={(e) => setStatus(e.target.value)}>
+        <option value="open">Открытые</option>
+        <option value="done">Выполненные</option>
+        <option value="cancelled">Снятые</option>
+      </select>
+      </Topbar>
       <ErrorBox error={list.error} />
       <div className="stack">
         {groups.filter(([, items]) => items.length).map(([title, items]) => (
@@ -77,7 +71,7 @@ export default function DeadlinesPage() {
                         <div className="small">{d.plaintiffs}</div>
                         <div className="muted small">{d.court_name}</div>
                       </td>
-                      <td className="small" style={{ maxWidth: 380, whiteSpace: "pre-wrap" }}>{d.rule}</td>
+                      <td className="small" style={{ maxWidth: 380 }}><details className="rule"><summary>{d.rule.split(":")[0]}{d.rule.includes("неизвестна") && " · уточните дату"}</summary><div>{d.rule}</div></details></td>
                       <td>{can("lawyer") && d.status === "open" && <button onClick={() => done(d)}>Выполнено</button>}</td>
                     </tr>
                   ))}

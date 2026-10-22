@@ -1,3 +1,5 @@
+from datetime import date
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import case as sa_case, func, select
 from sqlalchemy.orm import Session, selectinload
@@ -21,13 +23,15 @@ open_dl_sq = (select(func.count()).where(Deadline.case_id == Case.id, Deadline.s
               .correlate(Case).scalar_subquery())
 next_due_sq = (select(func.min(Deadline.due_date)).where(Deadline.case_id == Case.id, Deadline.status == "open")
                .correlate(Case).scalar_subquery())
+next_title_sq = (select(Deadline.title).where(Deadline.case_id == Case.id, Deadline.status == "open")
+                 .order_by(Deadline.due_date, Deadline.id).limit(1).correlate(Case).scalar_subquery())
 
 
 def brief_rows(rows) -> list[CaseBrief]:
     out = []
-    for c, n_conf, n_dl, nd in rows:
+    for c, n_conf, n_dl, nd, nt in rows:
         b = CaseBrief.model_validate(c)
-        b.conflicts, b.open_deadlines, b.next_due = n_conf or 0, n_dl or 0, nd
+        b.conflicts, b.open_deadlines, b.next_due, b.next_title = n_conf or 0, n_dl or 0, nd, nt
         out.append(b)
     return out
 
@@ -56,13 +60,15 @@ def list_cases(
     responsible: str = "",
     has_conflicts: bool | None = None,
     has_uid: bool | None = None,
+    due_before: date | None = None,
     sort: str = Query("-updated_at", pattern="^-?(updated_at|case_number|conflicts|next_due|id)$"),
     page: int = Query(1, ge=1),
     size: int = Query(50, ge=1, le=500),
     db: Session = Depends(get_db),
     _: Principal = Depends(require(role="viewer", scope="read")),
 ):
-    stmt = select(Case, conflicts_sq.label("conflicts"), open_dl_sq.label("open_dl"), next_due_sq.label("next_due"))
+    stmt = select(Case, conflicts_sq.label("conflicts"), open_dl_sq.label("open_dl"), next_due_sq.label("next_due"),
+                  next_title_sq.label("next_title"))
     if q:
         stmt = stmt.where(search_cases_filter(q))
     if court:
@@ -77,6 +83,8 @@ def list_cases(
         stmt = stmt.where(Case.responsible == responsible)
     if has_conflicts is not None:
         stmt = stmt.where((conflicts_sq > 0) if has_conflicts else (conflicts_sq == 0))
+    if due_before is not None:
+        stmt = stmt.where(next_due_sq <= due_before)
     if has_uid is not None:
         stmt = stmt.where(Case.uid.is_not(None) if has_uid else Case.uid.is_(None))
     total = db.scalar(select(func.count()).select_from(stmt.subquery()))

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { useSession } from "../App";
-import { api, qs, type CaseBrief, type CaseValue, type Page } from "../api";
+import { Topbar, useSession } from "../App";
+import { api, qs, shortCourt, type CaseBrief, type CaseValue, type Page } from "../api";
 import ResolvePanel from "../components/ResolvePanel";
 import { ErrorBox, Pager, StatusBadge, useLoad } from "../components/ui";
 
@@ -40,16 +40,12 @@ export default function ConflictsPage() {
 
   return (
     <>
-      <div className="page-head">
-        <div className="grow">
-          <h1>Очередь конфликтов</h1>
-          <div className="muted">Поля, где источники (1С, отчёт, OCR, цифровое письмо) расходятся. Решение пишется в журнал и уходит в выгрузку для 1С.</div>
-        </div>
-        <select value={field} onChange={(e) => setSp(e.target.value ? { field: e.target.value } : {})}>
-          <option value="">Все поля</option>
-          {fields.data?.map((f) => <option key={f.key} value={f.key}>{f.label}</option>)}
-        </select>
-      </div>
+      <Topbar title="Очередь конфликтов" sub="Источники расходятся — выберите верное значение. Решение уходит в журнал и выгрузку для 1С.">
+      <select value={field} onChange={(e) => setSp(e.target.value ? { field: e.target.value } : {})}>
+        <option value="">Все поля</option>
+        {fields.data?.map((f) => <option key={f.key} value={f.key}>{f.label}</option>)}
+      </select>
+      </Topbar>
       <ErrorBox error={list.error} />
       {list.data && items.length === 0 ? (
         <div className="panel empty-state">Конфликтов нет 🎉</div>
@@ -64,7 +60,7 @@ export default function ConflictsPage() {
                   <StatusBadge status={it.value.status} />
                 </div>
                 <div className="small">{it.case.case_number} · {it.case.plaintiffs}</div>
-                <div className="muted small">{it.case.court_name}</div>
+                <div className="muted small">{shortCourt(it.case.court_name)}</div>
               </div>
             ))}
             {list.data && <Pager page={page} size={list.data.size} total={list.data.total}

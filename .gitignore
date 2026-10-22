@@ -9,3 +9,5 @@ storage/
 certs/*.crt
 certs/*.key
 *.tsbuildinfo
+storage/
+.venv

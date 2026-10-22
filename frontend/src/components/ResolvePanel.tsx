@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { api, fmtDateTime, fmtValue, type CaseValue, type Observation } from "../api";
+import { api, fmtDateTime, fmtValue, moneyHint, type CaseValue, type Observation } from "../api";
 import { useSession } from "../App";
 import { StatusBadge } from "./ui";
 
@@ -108,6 +108,10 @@ export default function ResolvePanel({ value, onDone, hotkeys = false }: { value
       {value.status === "appeal_possible" && (
         <div className="notice">По делу есть признаки обжалования: значение в отчёте может быть после апелляции. Сверьте с актом апелляции.</div>
       )}
+      {value.kind === "money" && (() => {
+        const hint = moneyHint(choices.map((g) => g[0].value_num ?? 0));
+        return hint ? <div className="hint">{hint}</div> : null;
+      })()}
       {choices.map((group, i) => (
         <div key={i} className={`choice ${pick === i ? "on" : ""}`} onClick={() => editable && setPick(i)}>
           {hotkeys && editable && <kbd>{i + 1}</kbd>}

@@ -25,6 +25,7 @@ export default function LoginPage({ onLogin }: { onLogin: (m: Me) => void }) {
     <div className="login">
       <form className="panel" onSubmit={submit}>
         <div>
+          <div className="rail-logo">Ю</div>
           <h1>Рабочее место юриста</h1>
           <div className="muted">Вход с доменной учётной записью</div>
         </div>

@@ -79,6 +79,7 @@ export interface CaseBrief {
   conflicts: number;
   open_deadlines: number;
   next_due: string | null;
+  next_title?: string | null;
 }
 
 export interface Observation {
@@ -230,6 +231,31 @@ export function fmtValue(kind: string, v: string | null): string {
     if (!Number.isNaN(n)) return n.toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " ₽";
   }
   return v;
+}
+
+/** «Железнодорожный городской суд Московской области» → «Железнодорожный горсуд МО». */
+export function shortCourt(name: string): string {
+  return name
+    .replace(/городской суд/i, "горсуд")
+    .replace(/районный суд/i, "райсуд")
+    .replace(/Московской области/i, "МО")
+    .replace(/г\. Москвы/i, "Москва")
+    .replace(/г\. Санкт-Петербурга/i, "СПб")
+    .replace(/судебный участок/i, "с/у")
+    .replace(/мирового судьи/i, "МС");
+}
+
+/** Подсказка для расходящихся сумм: кратность 2 или 0,5 часто означает «на двух истцов / в равных долях». */
+export function moneyHint(values: number[]): string {
+  const v = values.filter((x) => x > 0).sort((a, b) => a - b);
+  for (let i = 0; i < v.length; i++)
+    for (let j = i + 1; j < v.length; j++) {
+      const r = v[j] / v[i];
+      for (const k of [2, 3, 4])
+        if (Math.abs(r - k) < 0.0005) return `Одно значение ровно в ${k} раза больше другого — возможно, сумма на ${k} истцов («в равных долях»).`;
+      if (Math.abs(r - 10) < 0.0005 || Math.abs(r - 100) < 0.0005) return "Значения отличаются на разряд — вероятна ошибка распознавания цифр.";
+    }
+  return "";
 }
 
 export function daysLeft(due: string): number {
