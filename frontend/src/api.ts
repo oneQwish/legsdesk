@@ -87,6 +87,8 @@ export interface CaseBrief {
   open_deadlines: number;
   next_due: string | null;
   next_title?: string | null;
+  awarded?: number | null;
+  claimed?: number | null;
 }
 
 export interface Observation {
@@ -264,6 +266,24 @@ export function moneyHint(values: number[]): string {
     }
   return "";
 }
+
+/** Краткая сумма: 1 257 727 → «1,26 млн», 612 567 → «613 тыс.» */
+export function fmtShortMoney(n: number | null | undefined): string {
+  if (n === null || n === undefined) return "—";
+  if (Math.abs(n) >= 1e6) return (n / 1e6).toLocaleString("ru-RU", { maximumFractionDigits: 2 }) + " млн";
+  if (Math.abs(n) >= 1e3) return Math.round(n / 1e3).toLocaleString("ru-RU") + " тыс.";
+  return Math.round(n).toLocaleString("ru-RU") + " ₽";
+}
+
+export const DEADLINE_KIND: Record<string, { label: string; color: string }> = {
+  appeal: { label: "апелляционная жалоба", color: "var(--seal)" },
+  effective: { label: "вступление в силу", color: "var(--ok)" },
+  cassation: { label: "кассационная жалоба", color: "var(--violet)" },
+  private_complaint: { label: "частная жалоба", color: "var(--ochre)" },
+  default_cancel: { label: "отмена заочного", color: "var(--ochre)" },
+  hearing: { label: "заседание", color: "var(--link)" },
+  custom: { label: "свой срок", color: "var(--ink-2)" },
+};
 
 export function daysLeft(due: string): number {
   const d = new Date(due + "T00:00:00");

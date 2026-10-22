@@ -2,11 +2,14 @@ import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Topbar, useSession } from "../App";
 import { ACTION_LABEL, api, fmtDate, fmtDateTime, fmtValue, shortCourt, type CaseFull, type CaseValue, type Deadline, type EventItem } from "../api";
+import AwardBar, { type AwardPart } from "../components/AwardBar";
+import CasePath from "../components/CasePath";
+import Chronology from "../components/Chronology";
 import ResolvePanel, { ObservationLine } from "../components/ResolvePanel";
 import { PromptModal, useToast } from "../components/overlay";
 import { DueBadge, ErrorBox, StatusBadge, useLoad } from "../components/ui";
 
-type Tab = "values" | "documents" | "deadlines" | "journal";
+type Tab = "values" | "chronology" | "documents" | "deadlines" | "journal";
 
 export default function CasePage() {
   const { id } = useParams();
@@ -43,7 +46,9 @@ export default function CasePage() {
         )}
       </Topbar>
 
-      <div className="panel pad" style={{ marginBottom: 14 }}>
+      <CasePath c={data} />
+      <div className="case-summary">
+      <div className="panel pad">
         <div className="facts">
           <div><span>Истцы</span>{data.plaintiffs || "—"}</div>
           <div><span>Ответчик</span>{data.legal_entity || "—"}</div>
@@ -62,6 +67,8 @@ export default function CasePage() {
           )}
         </div>
       </div>
+      <div className="panel"><AwardBar claimed={amounts(data.values).claimed} awarded={amounts(data.values).awarded} parts={amounts(data.values).parts} /></div>
+      </div>
 
       <div className="tabs">
         <button className={tab === "values" ? "on" : ""} onClick={() => setTab("values")}>
@@ -71,6 +78,7 @@ export default function CasePage() {
         <button className={tab === "deadlines" ? "on" : ""} onClick={() => setTab("deadlines")}>
           Сроки {openDl > 0 && <span className="badge single">{openDl}</span>}
         </button>
+        <button className={tab === "chronology" ? "on" : ""} onClick={() => setTab("chronology")}>Хронология</button>
         <button className={tab === "journal" ? "on" : ""} onClick={() => setTab("journal")}>Журнал</button>
       </div>
 
@@ -96,6 +104,7 @@ export default function CasePage() {
         </div>
       )}
       {tab === "deadlines" && <DeadlinesTab caseId={data.id} deadlines={data.deadlines} reload={c.reload} />}
+      {tab === "chronology" && <Chronology c={data} />}
       {tab === "journal" && <JournalTab caseId={data.id} />}
 
       {dialog === "responsible" && (
@@ -117,6 +126,21 @@ export default function CasePage() {
       )}
     </>
   );
+}
+
+const disputedV = (v: CaseValue) => v.status === "conflict" || v.status === "appeal_possible";
+const numV = (v: CaseValue) => Number(String(v.value ?? "").replace(/[^\d.,-]/g, "").replace(",", "."));
+
+/** Заявлено, присуждено (согласованные денежные поля без спорных) и разбивка по категориям. */
+function amounts(values: CaseValue[]): { claimed: number | null; awarded: number | null; parts: AwardPart[] } {
+  const claim = values.find((v) => v.field === "claim_total" && !disputedV(v) && v.value);
+  const parts = values
+    .filter((v) => v.kind === "money" && v.field !== "claim_total" && !disputedV(v) && v.value)
+    .map((v) => ({ label: v.label, value: numV(v) || 0 }))
+    .filter((p) => p.value > 0)
+    .sort((a, b) => b.value - a.value);
+  const awarded = parts.length ? parts.reduce((a, p) => a + p.value, 0) : null;
+  return { claimed: claim ? numV(claim) : null, awarded, parts };
 }
 
 function ValuesTab({ values, onChange }: { values: CaseValue[]; onChange: (v: CaseValue) => void }) {

@@ -1,5 +1,6 @@
 import { useNavigate } from "react-router-dom";
 import { daysLeft, fmtDate, shortCourt, type CaseBrief } from "../api";
+import AwardBar from "./AwardBar";
 
 export function caseTone(c: CaseBrief): string {
   if (!c.next_due) return "tone-none";
@@ -28,6 +29,7 @@ export default function CaseCard({ c, style, className = "" }: { c: CaseBrief; s
       <div className="who">{c.plaintiffs || "истцы не указаны"}</div>
       <div className="where ellipsis" title={c.court_name}>{shortCourt(c.court_name)}</div>
       {object && <div className="where ellipsis">{object} · {c.legal_entity}</div>}
+      <AwardBar compact claimed={c.claimed} awarded={c.awarded} />
       <div className="foot">
         {c.next_due ? (
           <div className="due">

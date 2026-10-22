@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session, selectinload
 from .. import deadlines as dl
 from ..db import get_db
 from ..fields import FIELDS, field_def
-from ..filters import CaseFilter, facet_counts, flags
+from ..filters import CaseFilter, facet_counts, flags, money
 from ..logic import log, merge_cases
 from ..models import Case, CaseValue, Deadline, Document, Event
 from ..schemas import (CaseBrief, CaseOut, CasePatch, DeadlineIn, DeadlineOut, DocumentBrief, EventOut, Page,
@@ -24,15 +24,24 @@ open_dl_sq = (select(func.count()).where(Deadline.case_id == Case.id, Deadline.s
               .correlate(Case).scalar_subquery())
 next_due_sq = (select(func.min(Deadline.due_date)).where(Deadline.case_id == Case.id, Deadline.status == "open")
                .correlate(Case).scalar_subquery())
+_money_fields = [k for k, f in FIELDS.items() if f.kind == "money" and k != "claim_total"]
+# Присуждено — сумма согласованных/решённых денежных полей (кроме «заявлено»); спорные не учитываются
+awarded_sq = (select(func.sum(money(CaseValue.value))).where(
+    CaseValue.case_id == Case.id, CaseValue.field.in_(_money_fields), CaseValue.status.notin_(DISPUTED),
+    CaseValue.value.is_not(None)).correlate(Case).scalar_subquery())
+claimed_sq = (select(money(CaseValue.value)).where(
+    CaseValue.case_id == Case.id, CaseValue.field == "claim_total", CaseValue.status.notin_(DISPUTED),
+    CaseValue.value.is_not(None)).limit(1).correlate(Case).scalar_subquery())
 next_title_sq = (select(Deadline.title).where(Deadline.case_id == Case.id, Deadline.status == "open")
                  .order_by(Deadline.due_date, Deadline.id).limit(1).correlate(Case).scalar_subquery())
 
 
 def brief_rows(rows) -> list[CaseBrief]:
     out = []
-    for c, n_conf, n_dl, nd, nt in rows:
+    for c, n_conf, n_dl, nd, nt, aw, cl in rows:
         b = CaseBrief.model_validate(c)
         b.conflicts, b.open_deadlines, b.next_due, b.next_title = n_conf or 0, n_dl or 0, nd, nt
+        b.awarded, b.claimed = (float(aw) if aw is not None else None), (float(cl) if cl is not None else None)
         out.append(b)
     return out
 
@@ -62,7 +71,8 @@ def list_cases(
 ):
     """Реестр дел. Все фильтры — см. CaseFilter (списочные параметры повторяются: ?building=401&building=308)."""
     stmt = select(Case, conflicts_sq.label("conflicts"), open_dl_sq.label("open_dl"), next_due_sq.label("next_due"),
-                  next_title_sq.label("next_title")).where(*f.where())
+                  next_title_sq.label("next_title"), awarded_sq.label("awarded"),
+                  claimed_sq.label("claimed")).where(*f.where())
     total = db.scalar(select(func.count()).select_from(stmt.subquery()))
     key = sort.lstrip("-")
     col = {"updated_at": Case.updated_at, "case_number": Case.case_number, "id": Case.id,

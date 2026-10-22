@@ -272,3 +272,38 @@ def test_filters_facets_and_views(svc, lawyer, viewer):
     lawyer.patch(f"/api/v1/views/{v['id']}", json={"on_desk": False})
     assert lawyer.get("/api/v1/views").json()[0]["on_desk"] is False
     assert lawyer.delete(f"/api/v1/views/{v['id']}").status_code == 204
+
+
+def test_desk_strip_progress_and_amounts(svc, lawyer):
+    from datetime import date, timedelta
+    today = date.today()
+    cid = ingest_case(svc, responsible="lawyer1")
+    svc.post("/api/v1/ingest/observations", json=[
+        {"uid": UID, "field": "claim_total", "source": "1С", "value": "1000000"},
+        {"uid": UID, "field": "amount_debt", "source": "1С", "value": "500000"},
+        {"uid": UID, "field": "amount_fine", "source": "1С", "value": "100000.50"},
+        {"uid": UID, "field": "amount_penalty", "source": "1С", "value": "1"},
+        {"uid": UID, "field": "amount_penalty", "source": "OCR", "value": "2"},   # спорная — не в сумме
+    ])
+    item = lawyer.get("/api/v1/cases").json()["items"][0]
+    assert item["claimed"] == 1000000 and item["awarded"] == 600000.5
+
+    # сроки: один просроченный, один через 3 дня
+    lawyer.post(f"/api/v1/cases/{cid}/deadlines", json={"title": "старый", "due_date": str(today - timedelta(days=2))})
+    d = lawyer.post(f"/api/v1/cases/{cid}/deadlines", json={"title": "скоро", "due_date": str(today + timedelta(days=3))}).json()
+    strip = lawyer.get("/api/v1/desk/strip?days=7").json()
+    assert strip["overdue"]["total"] == 1 and len(strip["days"]) == 7
+    assert strip["days"][3]["total"] == 1 and strip["days"][3]["kinds"] == {"custom": 1}
+    assert lawyer.get("/api/v1/desk/strip?building=999").json()["overdue"]["total"] == 0  # фильтры дел работают
+    # клик по дню ленты: сроки этого дня, даже если у дела есть более ранний (просроченный) срок
+    day = str(today + timedelta(days=3))
+    assert [x["title"] for x in lawyer.get(f"/api/v1/deadlines?due_from={day}&due_before={day}").json()] == ["скоро"]
+
+    p = lawyer.get("/api/v1/desk/progress").json()
+    assert p["streak"] == 0 and p["overdue_now"] == 1 and p["scope"] == "мои дела"
+    # закрыли срок и разрешили конфликт — это видно в прогрессе недели
+    lawyer.patch(f"/api/v1/deadlines/{d['id']}", json={"status": "done"})
+    pen = next(v for v in lawyer.get(f"/api/v1/cases/{cid}").json()["values"] if v["field"] == "amount_penalty")
+    lawyer.post(f"/api/v1/values/{pen['id']}/resolve", json={"observation_id": pen["observations"][0]["id"]})
+    m = lawyer.get("/api/v1/desk/progress").json()["metrics"]
+    assert m["deadlines"]["this_week"] == 1 and m["conflicts"]["this_week"] == 1

@@ -224,6 +224,8 @@ class CaseBrief(ORM):
     open_deadlines: int = 0
     next_due: date | None = None
     next_title: str | None = None
+    awarded: float | None = None  # присуждено: согласованные денежные поля (без спорных)
+    claimed: float | None = None  # заявлено (claim_total)
 
 
 class CaseOut(CaseBrief):

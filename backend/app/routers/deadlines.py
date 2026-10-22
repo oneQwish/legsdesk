@@ -27,6 +27,9 @@ def list_deadlines(
     db: Session = Depends(get_db),
     _: Principal = Depends(require(role="viewer", scope="read")),
 ):
+    # Даты на этой странице — даты самих сроков, а не ближайшего срока дела
+    due_after = due_after or f.due_from
+    f.due_from = f.due_to = None
     stmt = select(Deadline).join(Case).options(selectinload(Deadline.case)).where(*f.where())
     if status:
         stmt = stmt.where(Deadline.status.in_(status.split(",")))

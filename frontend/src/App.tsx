@@ -40,7 +40,7 @@ export function Topbar({ title, sub, children }: { title: ReactNode; sub?: React
       </div>
       {children}
       <button className="search-btn" onClick={openSearch}>
-        <Icon name="search" size={16} /> Найти дело <kbd>Ctrl K</kbd>
+        <Icon name="search" size={16} /> Дело, судья, команда… <kbd>Ctrl K</kbd>
       </button>
     </div>
   );

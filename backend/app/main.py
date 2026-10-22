@@ -7,7 +7,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .config import get_settings
 from .db import init_db
-from .routers import admin, auth, cases, conflicts, deadlines, documents, export, ingest, tasks, views
+from .routers import admin, auth, cases, conflicts, deadlines, documents, export, ingest, tasks, views, desk
 
 DESCRIPTION = """
 API рабочего места юриста. Люди входят доменной учёткой (cookie-сессия), сервисы системы
@@ -28,7 +28,7 @@ async def lifespan(_: FastAPI):
 app = FastAPI(title="Рабочее место юриста", version="0.1.0", description=DESCRIPTION, lifespan=lifespan,
               docs_url="/api/docs", openapi_url="/api/openapi.json", redoc_url=None)
 
-for r in (auth, cases, conflicts, documents, deadlines, ingest, tasks, export, admin, views):
+for r in (auth, cases, conflicts, documents, deadlines, ingest, tasks, export, admin, views, desk):
     app.include_router(r.router)
 
 

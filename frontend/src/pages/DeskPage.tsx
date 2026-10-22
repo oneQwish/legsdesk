@@ -3,6 +3,8 @@ import { Topbar, useSession } from "../App";
 import { api, qs, type CaseBrief, type Page } from "../api";
 import { VIEW_COLORS, type SavedView } from "../components/FilterPanel";
 import Pile from "../components/Pile";
+import DayStrip from "../components/DayStrip";
+import { CleanDesk, WeekProgress } from "../components/Progress";
 import { useToast } from "../components/overlay";
 import { useLoad } from "../components/ui";
 
@@ -37,12 +39,15 @@ export default function DeskPage() {
   return (
     <>
       <Topbar title="Стол" sub={<>{hello}, {me.full_name || me.login}. Дела разложены по стопкам — листайте или разложите пасьянсом. Свою стопку можно собрать фильтрами в <Link to="/cases">«Делах»</Link> → «Сохранить подборку».</>} />
-      <div className="ribbon">
-        <Link to="/deadlines" className={stats?.deadlines_overdue ? "hot" : ""}><div className="v">{stats?.deadlines_overdue ?? "—"}</div><div className="l">сроков просрочено</div></Link>
-        <Link to="/deadlines"><div className="v">{stats?.deadlines_week ?? "—"}</div><div className="l">сроков на 7 дней</div></Link>
-        <Link to="/conflicts" className={conflictsN ? "hot" : ""}><div className="v">{conflictsN}</div><div className="l">конфликтов источников</div></Link>
-        <Link to="/cases"><div className="v">{stats?.cases ?? "—"}</div><div className="l">дел · с УИД {stats?.cases_with_uid ?? "—"}</div></Link>
-        <Link to="/documents?unlinked=1"><div className="v">{stats?.documents ?? "—"}</div><div className="l">документов · без дела {stats?.documents_unlinked ?? "—"}</div></Link>
+      <div className="desk-top">
+        <DayStrip />
+        <CleanDesk />
+        <WeekProgress />
+      </div>
+      <div className="ribbon slim">
+        <Link to="/cases"><b>{stats?.cases ?? "—"}</b> дел · с УИД {stats?.cases_with_uid ?? "—"}</Link>
+        <Link to="/documents?unlinked=1"><b>{stats?.documents ?? "—"}</b> документов · без дела {stats?.documents_unlinked ?? "—"}</Link>
+        <Link to="/conflicts"><b>{conflictsN}</b> конфликтов источников</Link>
       </div>
       <div className="stacks">
         {(views.data ?? []).filter((v) => v.on_desk).map((v) => (
