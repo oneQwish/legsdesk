@@ -18,6 +18,8 @@ class Settings(BaseSettings):
     auth_mode: str = "ldap"
     dev_password: str = "dev"
     dev_role: str = "admin"
+    # роли отдельных логинов в dev-режиме (для пилота): "petrov=viewer,sidorova=lawyer"
+    dev_roles: str = ""
 
     # AD/LDAP
     ldap_url: str = "ldaps://dc.example.local"
@@ -33,6 +35,9 @@ class Settings(BaseSettings):
     docflow_url: str = ""  # HTTP-сервис 1С:ДО, напр. https://1c.example.local/docflow/hs/lawdesk
     docflow_user: str = ""
     docflow_password: str = ""
+
+    # Папка собранного интерфейса (по умолчанию frontend/dist рядом с backend)
+    frontend_dist: str = ""
 
     # Очередь задач
     task_default_lease_seconds: int = 600

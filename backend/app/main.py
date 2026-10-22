@@ -1,3 +1,5 @@
+import asyncio
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -7,8 +9,9 @@ from sqlalchemy import text
 from fastapi.staticfiles import StaticFiles
 
 from . import clock
+from . import deadlines as dl
 from .config import get_settings
-from .db import engine, init_db
+from .db import SessionLocal, engine, init_db
 from .routers import admin, auth, cases, conflicts, deadlines, documents, export, ingest, tasks, views, desk
 
 DESCRIPTION = """
@@ -35,11 +38,30 @@ def check_settings() -> None:
         raise RuntimeError(f"LAWDESK_TIMEZONE={s.timezone}: неизвестный часовой пояс (пример: Europe/Moscow)") from e
 
 
+def daily_upkeep() -> int:
+    """Регламентные действия «по дате»: закрыть прошедшие события (вступление в силу)."""
+    with SessionLocal() as db:
+        n = dl.close_passed_events(db, clock.today())
+        db.commit()
+        return n
+
+
+async def upkeep_loop():
+    while True:
+        try:
+            await asyncio.to_thread(daily_upkeep)
+        except Exception:  # noqa: BLE001 — регламент не должен ронять сервер; повторится через час
+            logging.getLogger("lawdesk").exception("регламентное действие не выполнено")
+        await asyncio.sleep(3600)
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     check_settings()
     init_db()
+    task = asyncio.create_task(upkeep_loop())
     yield
+    task.cancel()
 
 
 app = FastAPI(title="Рабочее место юриста", version="0.1.0", description=DESCRIPTION, lifespan=lifespan,
@@ -61,7 +83,7 @@ def health():
 
 
 # Собранный фронтенд (если есть) отдаётся этим же процессом; в docker-compose его отдаёт nginx.
-DIST = Path(__file__).resolve().parents[2] / "frontend" / "dist"
+DIST = Path(get_settings().frontend_dist or Path(__file__).resolve().parents[2] / "frontend" / "dist")
 if DIST.exists():
     app.mount("/assets", StaticFiles(directory=DIST / "assets"), name="assets")
 

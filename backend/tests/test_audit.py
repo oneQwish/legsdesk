@@ -111,3 +111,12 @@ def test_case_events_include_merged_history(svc, lawyer):
     assert lawyer.post(f"/api/v1/cases/{a}/merge/{b}").status_code == 200
     actions = [e["action"] for e in lawyer.get(f"/api/v1/cases/{a}/events").json()]
     assert actions.count("case_created") == 2 and "case_merged" in actions
+
+
+def test_dev_roles_per_login(monkeypatch):
+    monkeypatch.setattr(get_settings(), "dev_roles", "petrov=viewer, sidorova=lawyer")
+    monkeypatch.setattr(get_settings(), "dev_role", "admin")
+    c = TestClient(app)
+    assert c.post("/api/v1/auth/login", json={"login": "Petrov", "password": "dev"}).json()["role"] == "viewer"
+    assert c.post("/api/v1/auth/login", json={"login": "sidorova", "password": "dev"}).json()["role"] == "lawyer"
+    assert c.post("/api/v1/auth/login", json={"login": "boss", "password": "dev"}).json()["role"] == "admin"

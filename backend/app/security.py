@@ -151,7 +151,11 @@ def authenticate(db: Session, login: str, password: str) -> User:
     if s.auth_mode == "dev":
         if not hmac.compare_digest(password, s.dev_password):
             raise AuthError("Неверный пароль (dev-режим)")
-        full, mail, role = login, "", s.dev_role
+        roles = dict(x.strip().lower().split("=", 1) for x in s.dev_roles.split(",") if "=" in x)
+        role = roles.get(login, s.dev_role)
+        if role not in ROLES:
+            raise AuthError(f"LAWDESK_DEV_ROLES: неизвестная роль «{role}» (viewer, lawyer, admin)")
+        full, mail = login, ""
     else:
         full, mail, role = ldap_authenticate(login, password)
     user = db.scalar(select(User).where(User.login == login))

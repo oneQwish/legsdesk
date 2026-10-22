@@ -175,3 +175,26 @@ def recalc_case(db: Session, case: Case, cal: WorkCalendar | None = None) -> lis
             d.note = (d.note + "\n" if d.note else "") + "Снят автоматически: акт больше не порождает этот срок."
             changed.append(d)
     return changed
+
+
+def close_passed_events(db: Session, today: date) -> int:
+    """«Вступление в силу» — не действие юриста, а событие: когда его дата прошла, срок закрывается сам
+    (иначе он вечно висел бы «просроченным»). Если решение обжаловано (признак обжалования или есть акт
+    апелляции), в эту дату оно в силу не вступило — срок снимается. Возвращает число закрытых сроков."""
+    from .models import Event
+
+    rows = db.scalars(select(Deadline).where(Deadline.kind == "effective", Deadline.status == "open",
+                                             Deadline.due_date < today)).all()
+    for d in rows:
+        case = d.case
+        appealed = case.appeal_flag or any((doc.instance or "") == "апелляция" for doc in case.documents)
+        old = d.status
+        if appealed:
+            d.status = "cancelled"
+            d.note = (d.note + "\n" if d.note else "") + "Решение обжаловано — в эту дату в силу не вступило."
+        else:
+            d.status = "done"
+            d.note = (d.note + "\n" if d.note else "") + f"Вступило в силу {fmt(d.due_date)} (жалоба не поступала)."
+        db.add(Event(actor_type="system", actor="system", action="deadline_updated", entity="deadline",
+                     entity_id=d.id, case_id=d.case_id, data={"changes": {"status": [old, d.status]}, "auto": True}))
+    return len(rows)

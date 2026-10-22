@@ -72,3 +72,24 @@ def test_plan_decision_and_appeal_ruling():
                        motivated_date=date(2026, 9, 1), meta={"delivered_date": "2026-09-14"})
     kinds = {p.kind: p.term.due for p in plan_for_document(default, cal)}
     assert kinds["default_cancel"] == date(2026, 9, 23)
+
+
+def test_effective_closes_itself(svc, lawyer):
+    from datetime import date, timedelta
+    from app import deadlines as dl
+    from app.db import SessionLocal
+
+    def case_with_decision(uid, num, appeal):
+        svc.post("/api/v1/ingest/cases", json=[{"uid": uid, "court_code": "1", "case_number": num, "appeal_flag": appeal}])
+        r = svc.post("/api/v1/ingest/documents", json=[{"sha256": (uid[-1] * 64), "act_type": "решение", "instance": "первая",
+                                                        "act_date": "2027-01-11", "motivated_date": "2027-01-15", "case": {"uid": uid}}])
+        assert r.json()[0]["ok"], r.text
+
+    case_with_decision("U-1", "2-1/27", False)
+    case_with_decision("U-2", "2-2/27", True)
+    with SessionLocal() as db:
+        assert dl.close_passed_events(db, date(2027, 2, 1)) == 0  # ещё не наступило
+        assert dl.close_passed_events(db, date(2027, 3, 1)) == 2
+        db.commit()
+    dls = {d["case_number"]: d for d in lawyer.get("/api/v1/deadlines?status=done,cancelled&kind=effective").json()}
+    assert dls["2-1/27"]["status"] == "done" and dls["2-2/27"]["status"] == "cancelled"

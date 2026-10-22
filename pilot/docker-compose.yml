@@ -1,0 +1,60 @@
+# Пилот на своём компьютере: тестовые данные, вход без пароля AD (режим dev). НЕ для сервера.
+# Запуск — pilot/запустить.bat (Windows) или pilot/запустить.sh (macOS/Linux); подробно — docs/пилот.md
+name: lawdesk-pilot
+
+x-app-env: &app-env
+  LAWDESK_DATABASE_URL: postgresql+psycopg://lawdesk:pilot@db:5432/lawdesk
+  LAWDESK_AUTH_MODE: dev
+  LAWDESK_DEV_PASSWORD: dev
+  LAWDESK_DEV_ROLE: admin                                         # все прочие логины — администратор
+  LAWDESK_DEV_ROLES: ivanova=lawyer,sidorova=lawyer,petrov=viewer
+  LAWDESK_SECRET_KEY: pilot-only-not-a-secret-0123456789abcdef
+  LAWDESK_COOKIE_SECURE: "false"
+  LAWDESK_TIMEZONE: Europe/Moscow
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: lawdesk
+      POSTGRES_USER: lawdesk
+      POSTGRES_PASSWORD: pilot
+      TZ: Europe/Moscow
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lawdesk"]
+      interval: 3s
+      retries: 20
+
+  app:
+    build:
+      context: ..
+      dockerfile: pilot/Dockerfile
+    image: lawdesk-pilot
+    environment: *app-env
+    ports:
+      - "8080:8000"          # интерфейс: http://localhost:8080
+    volumes:
+      - storage:/data/storage
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8000/api/health',timeout=5)"]
+      interval: 3s
+      retries: 40
+
+  # Один раз загружает тестовые данные (если база пустая) и завершается
+  seed:
+    image: lawdesk-pilot
+    environment: *app-env
+    entrypoint: ["sh", "-c", "KEY=$$(python -m app.cli service pilot-seed --scopes read,ingest,tasks,calendar,export) && python /srv/connectors/pilot_seed.py --url http://app:8000 --key $$KEY"]
+    depends_on:
+      app:
+        condition: service_healthy
+    restart: "no"
+
+volumes:
+  pgdata:
+  storage:
