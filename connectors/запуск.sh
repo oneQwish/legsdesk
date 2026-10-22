@@ -7,6 +7,8 @@ cd "$(dirname "$0")" || exit 2
 RESULT=0
 for f in подключения/*.toml; do
     [ -e "$f" ] || continue
-    python3 lawdesk_connect.py запустить "$f" || RESULT=1
+    python3 lawdesk_connect.py запустить "$f"
+    CODE=$?
+    [ "$CODE" -gt "$RESULT" ] && RESULT=$CODE   # наибольший код: 1 строки, 2 настройки, 3 связь, 4 уже идёт, 5 сбой
 done
 exit $RESULT

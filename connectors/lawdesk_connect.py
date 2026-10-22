@@ -27,11 +27,16 @@ import hashlib
 import io
 import json
 import logging
+import logging.handlers
 import os
 import re
 import sqlite3
+import ssl
 import sys
+import time
 import tomllib
+import traceback
+from decimal import Decimal, InvalidOperation
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -40,9 +45,9 @@ import zipfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from lawdesk_client import Lawdesk, LawdeskError  # noqa: E402
+from lawdesk_client import RETRY_DELAYS, RETRY_STATUS, Lawdesk, LawdeskError, read_cursor, write_cursor  # noqa: E402
 
-VERSION = "1.0"
+VERSION = "1.1"
 log = logging.getLogger("lawdesk")
 
 
@@ -52,6 +57,14 @@ class ConfigError(Exception):
 
 class LinkError(Exception):
     """Внешняя система недоступна или ответила ошибкой (сеть, пароль, адрес)."""
+
+
+class AlreadyRunning(Exception):
+    """Это же подключение уже выполняется (долгий прошлый запуск по расписанию)."""
+
+
+# Коды возврата — для планировщика и запуск.bat
+EXIT_OK, EXIT_ROWS, EXIT_CONFIG, EXIT_LINK, EXIT_BUSY, EXIT_UNEXPECTED = 0, 1, 2, 3, 4, 5
 
 
 # =============================================================================================
@@ -66,10 +79,19 @@ def _money(v: str) -> str:
     s = re.sub(r"(руб\.?|₽|р\.)$", "", s, flags=re.I)
     if not s:
         return ""
-    try:
-        return f"{float(s):.2f}"
-    except ValueError:
+    try:  # Decimal, а не float: суммы до копейки без ошибок округления
+        return str(Decimal(s).quantize(Decimal("0.01")))
+    except InvalidOperation:
         raise ValueError(f"не похоже на сумму: «{v}»") from None
+
+
+def _kopecks(v: str) -> str:
+    if not v.strip():
+        return ""
+    try:
+        return str((Decimal(v.strip().replace(",", ".")) / 100).quantize(Decimal("0.01")))
+    except InvalidOperation:
+        raise ValueError(f"не похоже на сумму в копейках: «{v}»") from None
 
 
 def _date(v: str, fmt: str | None) -> str:
@@ -78,9 +100,11 @@ def _date(v: str, fmt: str | None) -> str:
         return ""
     if fmt:
         return dt.datetime.strptime(v, fmt).date().isoformat()
-    for f in ("%Y-%m-%d", "%d.%m.%Y", "%Y-%m-%dT%H:%M:%S", "%d.%m.%Y %H:%M:%S", "%d.%m.%Y %H:%M", "%Y%m%d"):
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2})?.*", v):  # дата со временем из SQL/1С/JSON
+        v = v[:10]
+    for f in ("%Y-%m-%d", "%d.%m.%Y", "%d.%m.%Y %H:%M:%S", "%d.%m.%Y %H:%M", "%Y%m%d"):
         try:
-            d = dt.datetime.strptime(v[:19] if "T" in v else v, f).date()
+            d = dt.datetime.strptime(v, f).date()
             return "" if d.year < 1900 else d.isoformat()  # 0001-01-01 — «пустая дата» 1С
         except ValueError:
             continue
@@ -95,7 +119,7 @@ def apply_filter(value: str, name: str, arg: str | None, maps: dict) -> str:
         case "upper": return v.upper()
         case "lower": return v.lower()
         case "money": return _money(v)
-        case "kopecks": return f"{int(float(v or 0)) / 100:.2f}" if v.strip() else ""
+        case "kopecks": return _kopecks(v)
         case "int": return str(int(float(v))) if v.strip() else ""
         case "date": return _date(v, arg)
         case "digits": return re.sub(r"\D", "", v)
@@ -145,7 +169,12 @@ def lookup(row: dict, key: str):
     if key in row:
         return row[key]
     cur = row
+    done: list[str] = []
     for part in key.split("."):
+        if cur is None and done:
+            # «{Суд.Code}» при незаполненном «Суд»: колонка есть, ссылка пустая — это не опечатка в настройках
+            raise KeyError(f"{key}» (значение «{'.'.join(done)}» не заполнено")
+        done.append(part)
         if isinstance(cur, dict):
             if part in cur:
                 cur = cur[part]
@@ -187,21 +216,41 @@ def _auth_header(cfg: dict) -> dict:
 
 
 def _http_json(url: str, cfg: dict, method: str = "GET", body=None) -> object:
+    """Запрос к внешней системе. Временные сбои (обрыв, 429, 5xx) повторяются с нарастающей паузой."""
     headers = {"Accept": "application/json", **_auth_header(cfg), **cfg.get("headers", {})}
     data = None
     if body is not None:
         data = json.dumps(body, ensure_ascii=False, default=str).encode()
         headers["Content-Type"] = "application/json; charset=utf-8"
-    req = urllib.request.Request(url, data=data, method=method, headers=headers)
-    try:
-        with urllib.request.urlopen(req, timeout=cfg.get("timeout", 120)) as r:
-            raw = r.read()
-            return json.loads(raw.decode(r.headers.get_content_charset() or "utf-8")) if raw else None
-    except urllib.error.HTTPError as e:
-        hint = {401: " (неверный логин/пароль)", 403: " (у пользователя нет прав)", 404: " (неверный адрес или имя объекта)"}.get(e.code, "")
-        raise LinkError(f"{method} {url} → HTTP {e.code}{hint}: {e.read().decode('utf-8', 'replace')[:300]}") from None
-    except urllib.error.URLError as e:
-        raise LinkError(f"{method} {url} — нет связи: {e.reason}") from None
+    ctx = ssl.create_default_context(cafile=cfg["cafile"]) if cfg.get("cafile") else None
+    for attempt in range(len(RETRY_DELAYS) + 1):
+        last = attempt == len(RETRY_DELAYS)
+        req = urllib.request.Request(url, data=data, method=method, headers=headers)
+        try:
+            with urllib.request.urlopen(req, timeout=cfg.get("timeout", 120), context=ctx) as r:
+                raw = r.read()
+            try:
+                return json.loads(raw.decode(r.headers.get_content_charset() or "utf-8")) if raw else None
+            except ValueError:
+                raise LinkError(f"{method} {url} — ответ не в формате JSON: {raw[:200].decode('utf-8', 'replace')}") from None
+        except urllib.error.HTTPError as e:
+            if e.code in RETRY_STATUS and not last:
+                log.info("   %s → HTTP %s, повтор через %d с", url, e.code, RETRY_DELAYS[attempt])
+                time.sleep(RETRY_DELAYS[attempt])
+                continue
+            hint = {401: " (неверный логин/пароль)", 403: " (у пользователя нет прав)", 404: " (неверный адрес или имя объекта)"}.get(e.code, "")
+            raise LinkError(f"{method} {url} → HTTP {e.code}{hint}: {e.read().decode('utf-8', 'replace')[:300]}") from None
+        except (urllib.error.URLError, TimeoutError, ConnectionError) as e:
+            reason = getattr(e, "reason", e)
+            if isinstance(reason, ssl.SSLError):
+                raise LinkError(f"{url} — сертификат не прошёл проверку ({reason}). Укажите корневой сертификат "
+                                f"компании: cafile = \"путь/к/ca.pem\" в этом же разделе") from None
+            if not last:
+                log.info("   %s — нет связи (%s), повтор через %d с", url, reason, RETRY_DELAYS[attempt])
+                time.sleep(RETRY_DELAYS[attempt])
+                continue
+            raise LinkError(f"{method} {url} — нет связи: {reason}") from None
+    raise AssertionError("недостижимо")
 
 
 def _items(data, path: str | None):
@@ -220,12 +269,23 @@ def _resolve(base: Path, p: str) -> Path:
 
 def read_csv(cfg: dict, base: Path):
     path = _resolve(base, cfg["path"])
-    enc = cfg.get("encoding", "utf-8-sig")
-    with open(path, encoding=enc, newline="") as f:
-        sample = f.read(4096)
-        f.seek(0)
-        delim = cfg.get("delimiter") or (";" if sample.count(";") >= sample.count(",") else ",")
-        yield from csv.DictReader(f, delimiter=delim)
+    raw = path.read_bytes()
+    enc = cfg.get("encoding")
+    if enc:
+        try:
+            text = raw.decode(enc)
+        except UnicodeDecodeError as e:
+            raise ConfigError(f"{path}: файл не в кодировке {enc} (байт {e.start}). Выгрузки 1С обычно в "
+                              f"utf-8 или cp1251 — попробуйте другую или уберите encoding") from None
+    else:  # не указано: UTF-8 (с BOM или без), иначе Windows-1251 — так сохраняют 1С и Excel
+        try:
+            text = raw.decode("utf-8-sig")
+        except UnicodeDecodeError:
+            text = raw.decode("cp1251")
+            log.info("   %s прочитан в кодировке cp1251", path.name)
+    sample = text[:4096]
+    delim = cfg.get("delimiter") or (";" if sample.count(";") >= sample.count(",") else ",")
+    yield from csv.DictReader(io.StringIO(text, newline=""), delimiter=delim)
 
 
 def read_xlsx(cfg: dict, base: Path):
@@ -291,16 +351,18 @@ def read_folder(cfg: dict, base: Path):
     """Файлы папки: имя, путь, размер, sha256; рядом лежащий «файл.json» добавляет свои поля."""
     root = _resolve(base, cfg["path"])
     pattern = cfg.get("pattern", "*")
+    min_age = float(cfg.get("min_age_minutes", 2))
+    if not root.is_dir():
+        raise ConfigError(f"нет папки {root}")
     files = root.rglob("*") if cfg.get("recursive", True) else root.glob("*")
     for p in sorted(files):
         if not p.is_file() or p.suffix.lower() == ".json" or not fnmatch.fnmatch(p.name.lower(), pattern.lower()):
             continue
-        h = hashlib.sha256()
-        with open(p, "rb") as f:
-            for chunk in iter(lambda: f.read(1 << 20), b""):
-                h.update(chunk)
+        if time.time() - p.stat().st_mtime < min_age * 60:
+            log.info("   %s изменён меньше %d мин назад — возьму в следующий раз (вдруг ещё дописывается)", p.name, min_age)
+            continue
         rec = {"файл": p.name, "путь": str(p), "папка": p.parent.name, "имя": p.stem,
-               "расширение": p.suffix.lower().lstrip("."), "размер": p.stat().st_size, "sha256": h.hexdigest()}
+               "расширение": p.suffix.lower().lstrip("."), "размер": p.stat().st_size, "sha256": _file_sha256(p)}
         side = p.with_suffix(p.suffix + ".json") if p.with_suffix(p.suffix + ".json").exists() else p.with_suffix(".json")
         if side.exists():
             with open(side, encoding="utf-8-sig") as f:
@@ -323,9 +385,10 @@ def read_http_json(cfg: dict, base: Path):
             nxt = data
             for part in cfg["next_path"].split("."):
                 nxt = nxt.get(part) if isinstance(nxt, dict) else None
-            url, params = (nxt, {}) if nxt else (None, {})
-        elif page_size and len(items) >= page_size:
-            offset += page_size
+            url, params = (urllib.parse.urljoin(full, nxt), {}) if nxt else (None, {})
+        elif page_size and items:
+            # до пустой страницы: сервер может отдавать меньше page_size за раз — иначе данные обрезались бы молча
+            offset += len(items)
             params[cfg.get("offset_param", "offset")] = offset
             params[cfg.get("limit_param", "limit")] = page_size
         else:
@@ -346,9 +409,9 @@ def read_odata(cfg: dict, base: Path):
         url = f"{root}/{urllib.parse.quote(entity)}?" + urllib.parse.urlencode(q, quote_via=urllib.parse.quote)
         items = _items(_http_json(url, cfg), "value")
         yield from items
-        if len(items) < page:
+        if not items:  # до пустой страницы: 1С может ограничивать размер страницы меньшим числом
             return
-        skip += page
+        skip += len(items)
 
 
 def read_sqlite(cfg: dict, base: Path):
@@ -360,6 +423,8 @@ def read_sqlite(cfg: dict, base: Path):
     try:
         for r in con.execute(cfg["query"]):
             yield dict(r)
+    except sqlite3.Error as e:
+        raise ConfigError(f"запрос query к {path.name}: {e}") from None
     finally:
         con.close()
 
@@ -374,9 +439,12 @@ def read_sql(cfg: dict, base: Path):
     if not url:
         raise ConfigError("для type = \"sql\" укажите url или url_env (имя переменной окружения со строкой подключения)")
     eng = sa.create_engine(url)
-    with eng.connect() as c:
-        for r in c.execute(sa.text(cfg["query"])).mappings():
-            yield dict(r)
+    try:
+        with eng.connect() as c:
+            for r in c.execute(sa.text(cfg["query"])).mappings():
+                yield dict(r)
+    except sa.exc.SQLAlchemyError as e:
+        raise LinkError(f"база данных: {str(e).splitlines()[0]}") from None
 
 
 SOURCES = {"csv": read_csv, "xlsx": read_xlsx, "json": read_json, "folder": read_folder,
@@ -496,6 +564,8 @@ def map_row(cfg: dict, row: dict) -> dict:
 
 def run_in(cfg: dict, base: Path, ld: Lawdesk | None, limit: int | None, dry: bool) -> int:
     cases, observations, documents, uploads, calendar = [], [], [], [], {}
+    # номер строки источника для каждого отправляемого элемента — чтобы ошибку сервера можно было найти в выгрузке
+    case_rows, obs_rows, doc_rows = [], [], []
     problems = 0
     for i, row in enumerate(read_rows(cfg["source"], base, limit), 1):
         try:
@@ -514,12 +584,23 @@ def run_in(cfg: dict, base: Path, ld: Lawdesk | None, limit: int | None, dry: bo
                 log.warning("строка %d: у дела нет ни УИД, ни номера — пропущена", i)
                 continue
             cases.append(m["case"])
+            case_rows.append(i)
         observations += m.get("observations", [])
+        obs_rows += [i] * len(m.get("observations", []))
         if m.get("document"):
             doc = m["document"]
-            (uploads if doc.get("_file") else documents).append(doc)
+            doc["_row"] = i
+            if doc.get("_file"):
+                uploads.append(doc)
+            else:
+                documents.append(doc)
+                doc_rows.append(i)
         if m.get("calendar_day"):
             day, nonworking = m["calendar_day"]
+            if day and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", day):
+                problems += 1
+                log.warning("строка %d: дата календаря «%s» не в виде ГГГГ-ММ-ДД — добавьте фильтр |date — пропущена", i, day)
+                continue
             if day:
                 calendar.setdefault(day[:4], set())
                 if nonworking:
@@ -529,32 +610,46 @@ def run_in(cfg: dict, base: Path, ld: Lawdesk | None, limit: int | None, dry: bo
     if dry or ld is None:
         return problems
 
-    def report(kind: str, res: list[dict]):
+    def report(kind: str, res: list[dict], rows: list[int]):
         nonlocal problems
-        bad = [r for r in res if not r.get("ok")]
+        bad = [(rows[k] if k < len(rows) else "?", r) for k, r in enumerate(res) if not r.get("ok")]
         problems += len(bad)
-        warns = [w for r in res if r.get("ok") for w in r.get("warnings", [])]
+        warns = [(rows[k] if k < len(rows) else "?", w) for k, r in enumerate(res) if r.get("ok") for w in r.get("warnings", [])]
         log.info("%s: отправлено %d, ошибок %d, предупреждений %d", kind, len(res), len(bad), len(warns))
-        for r in bad[:20]:
-            log.warning("   ошибка: %s", r.get("error"))
-        for w in warns[:20]:
-            log.warning("   предупреждение: %s", w)
+        for n, r in bad[:20]:
+            log.warning("   строка %s: ошибка: %s", n, r.get("error"))
+        for n, w in warns[:20]:
+            log.warning("   строка %s: предупреждение: %s", n, w)
+        if len(bad) > 20 or len(warns) > 20:
+            log.warning("   … показаны первые 20")
 
+    for d in documents:
+        d.pop("_row", None)
     if cases:
-        report("дела", ld.cases(cases))
+        report("дела", ld.cases(cases), case_rows)
     if documents:
-        report("документы", ld.documents(documents))
+        report("документы", ld.documents(documents), doc_rows)
+    sent = SentFiles(_state_dir(cfg, base) / f"{_slug(cfg['connector']['name'])}.отправлено")
+    loaded = skipped = 0
     for doc in uploads:
-        f, sig = doc.pop("_file"), doc.pop("_signature", None)
+        f, sig, row = doc.pop("_file"), doc.pop("_signature", None), doc.pop("_row")
         try:
-            ld.upload(_resolve(base, f), doc, _resolve(base, sig) if sig else None)
+            sha = doc.get("sha256") or _file_sha256(_resolve(base, f))
+            if sha in sent:
+                skipped += 1  # уже загружен прошлым запуском — не гоняем файл по сети заново
+                continue
+            r = ld.upload(_resolve(base, f), doc, _resolve(base, sig) if sig else None)
+            sent.add(sha)
+            loaded += 1
+            if r and r.get("case_id") is None and doc.get("case"):
+                log.warning("   строка %d: файл %s загружен, но дело %s не найдено — привяжите вручную", row, f, doc["case"])
         except (LawdeskError, OSError) as e:
             problems += 1
-            log.warning("файл %s: %s", f, e)
+            log.warning("   строка %d: файл %s: %s", row, f, e)
     if uploads:
-        log.info("файлы: загружено %d", len(uploads))
+        log.info("файлы: загружено %d, уже были загружены раньше %d", loaded, skipped)
     if observations:
-        report("значения полей", ld.observations(observations))
+        report("значения полей", ld.observations(observations), obs_rows)
     for year, days in sorted(calendar.items()):
         try:
             r = ld.calendar(int(year), sorted(days), cfg["calendar"].get("source_name", cfg["connector"]["name"]))
@@ -563,6 +658,71 @@ def run_in(cfg: dict, base: Path, ld: Lawdesk | None, limit: int | None, dry: bo
             problems += 1
             log.warning("календарь %s: %s", year, e.detail)
     return problems
+
+
+def _file_sha256(path: Path) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+class SentFiles:
+    """Список sha256 уже загруженных файлов (папка документов): повторный запуск не закачивает их снова."""
+
+    def __init__(self, path: Path):
+        self.path = path
+        self.items = set(path.read_text(encoding="utf-8").split()) if path.exists() else set()
+
+    def __contains__(self, sha: str) -> bool:
+        return sha in self.items
+
+    def add(self, sha: str) -> None:
+        if sha and sha not in self.items:
+            self.items.add(sha)
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            with open(self.path, "a", encoding="utf-8") as f:
+                f.write(sha + "\n")
+
+
+def _state_dir(cfg: dict, base: Path) -> Path:
+    return _resolve(base, "состояние")
+
+
+class RunLock:
+    """Не даёт запустить одно подключение дважды одновременно (например, прошлый запуск по расписанию
+    ещё идёт). Замок снимается сам, даже если процесс упал: его держит операционная система."""
+
+    def __init__(self, path: Path):
+        self.path, self.f = path, None
+
+    def __enter__(self):
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.f = open(self.path, "a+")
+        try:
+            if os.name == "nt":
+                import msvcrt
+                self.f.seek(0)
+                msvcrt.locking(self.f.fileno(), msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(self.f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            self.f.close()
+            raise AlreadyRunning(f"это подключение уже выполняется (замок {self.path.name}); "
+                                 f"этот запуск пропущен — данные заберёт текущий или следующий") from None
+        return self
+
+    def __exit__(self, *exc):
+        if os.name == "nt":
+            import msvcrt
+            try:
+                self.f.seek(0)
+                msvcrt.locking(self.f.fileno(), msvcrt.LK_UNLCK, 1)
+            except OSError:
+                pass
+        self.f.close()
 
 
 # =============================================================================================
@@ -586,65 +746,105 @@ def event_row(ev: dict, case: dict | None, fields: dict) -> dict:
 
 
 def run_out(cfg: dict, base: Path, ld: Lawdesk, limit: int | None, dry: bool) -> int:
+    """Лента → приёмник порциями по 500 событий; курсор сохраняется после каждой записанной порции.
+    Сбой посередине — при следующем запуске повторяется только незаписанная часть."""
     feed = cfg.get("feed", {})
     state = _resolve(base, feed.get("state_file", f"состояние/{_slug(cfg['connector']['name'])}.курсор"))
-    cursor = int(state.read_text().strip() or 0) if state.exists() else int(feed.get("start_from", 0))
+    try:
+        cursor = read_cursor(state, int(feed.get("start_from", 0)))
+    except ValueError as e:
+        raise ConfigError(str(e)) from None
     actions = ",".join(feed.get("actions", ["value_resolved"]))
     fields = {f["key"]: f["label"] for f in ld.request("GET", "/api/v1/fields")}
     cases_cache: dict[int, dict] = {}
-    rows, last = [], cursor
+    cols = cfg["sink"].get("columns")
+    out = SinkWriter(cfg["sink"], base, cfg["connector"]["name"])
+    last, total = cursor, 0
     while True:
         page = ld.changes(last, actions, limit=500)
+        rows, ids = [], []
         for ev in page["items"]:
             cid = ev.get("case_id")
             if cid and cid not in cases_cache:
                 try:
                     cases_cache[cid] = ld.get_case(cid)
-                except LawdeskError:
-                    cases_cache[cid] = {}
+                except LawdeskError as e:
+                    if e.status != 404:  # временный сбой — прервать без сдвига курсора, а не выгрузить строку без УИД
+                        raise
+                    cases_cache[cid] = {}  # дело слито с другим или удалено — данных о нём больше нет
             r = event_row(ev, cases_cache.get(cid), fields)
-            cols = cfg["sink"].get("columns")
             rows.append({k: render(v, r, cfg.get("maps", {}), strict=False) for k, v in cols.items()} if cols else r)
-        if page["next_cursor"] == last or (limit and len(rows) >= limit):
-            last = page["next_cursor"]
-            break
+            ids.append(ev["id"])
+        if dry:
+            for r in rows[:3]:
+                log.info("   будет записано: %s", json.dumps(r, ensure_ascii=False, default=str)[:600])
+            log.info("новых событий в первой порции: %d (курсор %d); проверка ничего не записывает", len(rows), cursor)
+            return 0
+        if rows:
+            out.write(rows, ids)
+        total += len(rows)
+        if page["next_cursor"] != last:
+            write_cursor(state, page["next_cursor"])
+        done = page["next_cursor"] == last or (limit and total >= limit)
         last = page["next_cursor"]
-    log.info("новых событий: %d (курсор %d → %d)", len(rows), cursor, last)
-    if dry:
-        for r in rows[:3]:
-            log.info("   будет записано: %s", json.dumps(r, ensure_ascii=False, default=str)[:600])
-        return 0
-    if rows:
-        write_sink(cfg["sink"], base, rows, cfg["connector"]["name"])
-    state.parent.mkdir(parents=True, exist_ok=True)
-    state.write_text(str(last))  # курсор сохраняется только после успешной записи
+        if done:
+            break
+    log.info("выгружено событий: %d (курсор %d → %d)", total, cursor, last)
     return 0
 
 
-def write_sink(sink: dict, base: Path, rows: list[dict], name: str) -> None:
-    t = sink.get("type")
-    stamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
-    if t in ("csv", "json"):
-        path = _resolve(base, sink["path"].replace("{date}", stamp))
-        path.parent.mkdir(parents=True, exist_ok=True)
-        if t == "csv":
-            new = not path.exists() or sink.get("mode", "new") == "new"
-            with open(path, "a" if not new else "w", encoding=sink.get("encoding", "utf-8-sig"), newline="") as f:
-                w = csv.DictWriter(f, fieldnames=list(rows[0].keys()), delimiter=sink.get("delimiter", ";"), extrasaction="ignore")
+class SinkWriter:
+    """Приёмник выгрузки. Все порции одного запуска — в один файл (или в HTTP-сервис пакетами по batch)."""
+
+    def __init__(self, sink: dict, base: Path, name: str):
+        self.sink, self.base, self.name = sink, base, name
+        self.t = sink.get("type")
+        if self.t not in ("csv", "json", "http"):
+            raise ConfigError(f"[sink] type = «{self.t}» — неизвестный приёмник. Доступны: csv, json, http")
+        self.path: Path | None = None
+        self.rows_json: list[dict] = []
+
+    def _target(self) -> Path:
+        if self.path is None:
+            stamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+            path = _resolve(self.base, self.sink["path"].replace("{date}", stamp))
+            path.parent.mkdir(parents=True, exist_ok=True)
+            if path.exists() and (self.t == "json" or self.sink.get("mode", "new") == "new"):
+                # прошлый файл ещё не забран — не затирать его, а положить рядом новый
+                path = path.with_name(f"{path.stem}_{stamp}{path.suffix}")
+                log.warning("   файл %s уже есть (не забран?) — пишу в %s", self.sink["path"], path.name)
+            self.path = path
+        return self.path
+
+    def write(self, rows: list[dict], ids: list[int]) -> None:
+        if self.t == "http":
+            batch = int(self.sink.get("batch", 200))
+            for i in range(0, len(rows), batch):
+                part = rows[i:i + batch]
+                # ids — номера событий: по ним приёмник отличает повтор от нового (повтор возможен после сбоя)
+                body = ({"source": "lawdesk", "connector": self.name, "ids": ids[i:i + batch], "items": part}
+                        if self.sink.get("envelope", True) else part)
+                _http_json(self.sink["url"], self.sink, self.sink.get("method", "POST"), body)
+            log.info("отправлено в %s: %d строк", self.sink["url"], len(rows))
+            return
+        path = self._target()
+        if self.t == "csv":
+            new = not path.exists() or path.stat().st_size == 0
+            with open(path, "a", encoding=self.sink.get("encoding", "utf-8-sig"), newline="") as f:
+                w = csv.DictWriter(f, fieldnames=list(rows[0].keys()), delimiter=self.sink.get("delimiter", ";"),
+                                   extrasaction="ignore")
                 if new:
                     w.writeheader()
-                w.writerows({k: (json.dumps(v, ensure_ascii=False) if isinstance(v, (dict, list)) else v) for k, v in r.items()} for r in rows)
+                w.writerows({k: (json.dumps(v, ensure_ascii=False) if isinstance(v, (dict, list)) else v)
+                             for k, v in r.items()} for r in rows)
+                f.flush()
+                os.fsync(f.fileno())
         else:
-            path.write_text(json.dumps(rows, ensure_ascii=False, indent=1, default=str), encoding="utf-8")
+            self.rows_json += rows
+            tmp = path.with_name(path.name + ".tmp")
+            tmp.write_text(json.dumps(self.rows_json, ensure_ascii=False, indent=1, default=str), encoding="utf-8")
+            os.replace(tmp, path)
         log.info("записано в %s: %d строк", path, len(rows))
-    elif t == "http":
-        batch = int(sink.get("batch", 200))
-        for i in range(0, len(rows), batch):
-            body = {"source": "lawdesk", "connector": name, "items": rows[i:i + batch]} if sink.get("envelope", True) else rows[i:i + batch]
-            _http_json(sink["url"], sink, sink.get("method", "POST"), body)
-        log.info("отправлено в %s: %d строк", sink["url"], len(rows))
-    else:
-        raise ConfigError(f"[sink] type = «{t}» — неизвестный приёмник. Доступны: csv, json, http")
 
 
 # =============================================================================================
@@ -656,14 +856,14 @@ ALLOWED = {
     "source": {"type", "path", "encoding", "delimiter", "sheet", "skip_rows", "date_columns", "items_path", "pattern",
                "recursive", "url", "user", "password", "password_env", "headers", "params", "timeout", "page_size",
                "next_path", "offset_param", "limit_param", "entity", "select", "filter", "expand", "orderby", "query",
-               "url_env", "only_if"},
+               "url_env", "only_if", "cafile", "min_age_minutes"},
     "cases": set(CASE_KEYS) | {"aliases"},
     "observations": {"source", "source_ref", "fields", "send_empty", "uid", "court_code", "case_number", "case_id"},
     "documents": set(DOC_KEYS) | {"file", "signature_file", "meta", "case"},
     "calendar": {"date", "day_type", "nonworking_values", "working", "source_name"},
     "feed": {"actions", "state_file", "start_from"},
     "sink": {"type", "path", "encoding", "delimiter", "mode", "url", "method", "user", "password", "password_env",
-             "headers", "timeout", "batch", "envelope", "columns"},
+             "headers", "timeout", "batch", "envelope", "columns", "cafile"},
     "maps": None,
 }
 
@@ -687,6 +887,9 @@ def load_config(path: Path) -> dict:
             if k not in ALLOWED[section] and not (section == "observations" and k == "fields"):
                 hint = min(ALLOWED[section], key=lambda a: _distance(a, k))
                 raise ConfigError(f"[{section}] неизвестный параметр «{k}». Может быть, «{hint}»?")
+    for section in ("source", "sink"):
+        if cfg.get(section, {}).get("password"):
+            log.warning("[%s] пароль записан прямо в файле настроек — надёжнее password_env (переменная из секреты.bat)", section)
     con = cfg.get("connector", {})
     if not con.get("name"):
         raise ConfigError("в разделе [connector] укажите name — название подключения (для журнала)")
@@ -718,7 +921,9 @@ def _slug(s: str) -> str:
 
 def client(cfg: dict, base: Path) -> Lawdesk:
     con = cfg["connector"]
-    url = con.get("api_url") or os.environ.get("LAWDESK_URL")
+    # переменная LAWDESK_URL (секреты.bat) главнее api_url: заготовки из «примеров» указывают на 127.0.0.1,
+    # и скопированные настройки не должны молча уходить не туда
+    url = os.environ.get("LAWDESK_URL") or con.get("api_url")
     key = None
     if con.get("api_key_file"):
         key = _resolve(base, con["api_key_file"]).read_text(encoding="utf-8").strip()
@@ -727,6 +932,9 @@ def client(cfg: dict, base: Path) -> Lawdesk:
         raise ConfigError("не указан адрес рабочего места: [connector] api_url или переменная LAWDESK_URL")
     if not key:
         raise ConfigError(f"нет API-ключа: переменная окружения {con.get('api_key_env', 'LAWDESK_KEY')} или файл [connector] api_key_file")
+    host = urllib.parse.urlparse(url).hostname or ""
+    if url.startswith("http://") and host not in ("127.0.0.1", "localhost"):
+        log.warning("адрес рабочего места %s без HTTPS — API-ключ передаётся открытым текстом; используйте https://", url)
     return Lawdesk(url, key, cafile=con.get("cafile"))
 
 
@@ -778,6 +986,12 @@ def check_fields(cfg: dict, ld: Lawdesk | None) -> None:
 
 
 def setup_logging(cfg: dict | None, base: Path) -> None:
+    for stream in (sys.stdout, sys.stderr):  # консоль Windows в cp1251 не должна ронять вывод на «→» и «№»
+        try:
+            stream.reconfigure(errors="replace")
+        except (AttributeError, ValueError):
+            pass
+    log.handlers.clear()
     log.setLevel(logging.INFO)
     h = logging.StreamHandler(sys.stdout)
     h.setFormatter(logging.Formatter("%(message)s"))
@@ -785,7 +999,9 @@ def setup_logging(cfg: dict | None, base: Path) -> None:
     if cfg:
         d = _resolve(base, cfg["connector"].get("log_dir", "журналы"))
         d.mkdir(parents=True, exist_ok=True)
-        fh = logging.FileHandler(d / f"{_slug(cfg['connector']['name'])}.log", encoding="utf-8")
+        # 5 файлов по 5 МБ: журнал не разрастается бесконечно
+        fh = logging.handlers.RotatingFileHandler(d / f"{_slug(cfg['connector']['name'])}.log", maxBytes=5 << 20,
+                                                  backupCount=5, encoding="utf-8")
         fh.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
         log.addHandler(fh)
 
@@ -818,8 +1034,13 @@ def main(argv: list[str]) -> int:
     base = path.parent
     limit = None
     if "--limit" in argv:
-        limit = int(argv[argv.index("--limit") + 1])
+        i = argv.index("--limit") + 1
+        if i >= len(argv) or not argv[i].isdigit():
+            print("После --limit укажите число строк, например: --limit 10")
+            return EXIT_CONFIG
+        limit = int(argv[i])
     try:
+        setup_logging(None, base)
         cfg = load_config(path)
         setup_logging(cfg, base)
         con = cfg["connector"]
@@ -831,42 +1052,72 @@ def main(argv: list[str]) -> int:
                 print(f"{f['key']:<24} {f['label']:<34} {f['kind']:<6} {f['group']}")
             return 0
         direction = con.get("direction", "in")
-        if direction == "in":
-            check_templates(cfg, base)
-            ld = None
-            if cmd == "run" or con.get("api_url") or os.environ.get("LAWDESK_URL"):
-                try:
-                    ld = client(cfg, base)
-                except ConfigError as e:
-                    if cmd == "run":
-                        raise
-                    log.info("(связь с рабочим местом не проверялась: %s)", e)
-            check_fields(cfg, ld)
-            problems = run_in(cfg, base, ld if cmd == "run" else None, limit, dry=(cmd == "check"))
-        else:
-            ld = client(cfg, base)
-            problems = run_out(cfg, base, ld, limit, dry=(cmd == "check"))
+        lock = RunLock(_state_dir(cfg, base) / f"{_slug(con['name'])}.замок") if cmd == "run" else None
+        if lock:
+            lock.__enter__()
+        try:
+            problems = _run(cmd, cfg, base, con, direction, limit)
+        finally:
+            if lock:
+                lock.__exit__(None, None, None)
         log.info("готово%s", f", проблем: {problems} (подробности выше и в журнале)" if problems else ", без ошибок")
-        return 1 if problems else 0
+        return EXIT_ROWS if problems else EXIT_OK
+    except AlreadyRunning as e:
+        log.warning("ПРОПУЩЕНО: %s", e)
+        return EXIT_BUSY
     except ConfigError as e:
-        if not log.handlers:
-            setup_logging(None, base)
         log.error("ОШИБКА НАСТРОЕК: %s", e)
-        return 2
+        return EXIT_CONFIG
     except LinkError as e:
         log.error("ОШИБКА СВЯЗИ С ВНЕШНЕЙ СИСТЕМОЙ: %s", e)
-        log.error("→ ничего не потеряно: при следующем запуске всё будет повторено")
-        return 3
+        log.error("→ уже записанное сохранено; при следующем запуске продолжится с места остановки")
+        return EXIT_LINK
     except LawdeskError as e:
         log.error("ОШИБКА РАБОЧЕГО МЕСТА (HTTP %s): %s", e.status, e.detail)
         if e.status == 401:
             log.error("→ проверьте API-ключ: он мог быть отозван или скопирован не полностью")
         if e.status == 403:
             log.error("→ у ключа нет нужной области доступа (read / ingest / export / calendar) — см. «Сервисы и API»")
-        return 3
+        return EXIT_LINK
     except (OSError, urllib.error.URLError) as e:
         log.error("ОШИБКА ДОСТУПА: %s", e)
-        return 3
+        return EXIT_LINK
+    except Exception as e:  # noqa: BLE001 — человеку текст, программисту трассировка в файле журнала
+        log.error("НЕОЖИДАННАЯ ОШИБКА: %s: %s", type(e).__name__, e)
+        log.error("→ %s", _hint(e))
+        for h in log.handlers:
+            if isinstance(h, logging.FileHandler):
+                h.stream.write(traceback.format_exc())
+        return EXIT_UNEXPECTED
+
+
+def _hint(e: Exception) -> str:
+    if isinstance(e, UnicodeDecodeError):
+        return "файл не в той кодировке: укажите в [source] encoding = \"cp1251\" или \"utf-8\""
+    if isinstance(e, json.JSONDecodeError):
+        return f"файл JSON повреждён или это не JSON (строка {e.lineno}, позиция {e.colno})"
+    if isinstance(e, zipfile.BadZipFile):
+        return "файл не является книгой Excel .xlsx (старый .xls пересохраните в .xlsx)"
+    return "подробности для программиста — в файле журнала (папка журналы)"
+
+
+def _run(cmd: str, cfg: dict, base: Path, con: dict, direction: str, limit: int | None) -> int:
+    if direction == "in":
+        check_templates(cfg, base)
+        ld = None
+        if cmd == "run" or con.get("api_url") or os.environ.get("LAWDESK_URL"):
+            try:
+                ld = client(cfg, base)
+            except ConfigError as e:
+                if cmd == "run":
+                    raise
+                log.info("(связь с рабочим местом не проверялась: %s)", e)
+        check_fields(cfg, ld)
+        problems = run_in(cfg, base, ld if cmd == "run" else None, limit, dry=(cmd == "check"))
+    else:
+        ld = client(cfg, base)
+        problems = run_out(cfg, base, ld, limit, dry=(cmd == "check"))
+    return problems
 
 
 if __name__ == "__main__":

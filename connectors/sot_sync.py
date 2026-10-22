@@ -20,6 +20,7 @@ import os
 import sqlite3
 import sys
 from collections import Counter
+from decimal import Decimal
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
@@ -209,11 +210,11 @@ def read_values(con, m: dict, case_keys: dict):
             if isinstance(val, list):
                 val = "; ".join(map(str, val))
             if raw_field in KOPECK_FIELDS:
-                val = f"{int(val) / 100:.2f}"
+                val = str((Decimal(str(val).replace(",", ".")) / 100).quantize(Decimal("0.01")))  # «12345» и «12345.0»
             yield {**ref, "field": field, "source": src, "source_ref": sref or "sot.db", "value": str(val), "quote": quote}
 
 
-def main() -> None:
+def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--db", required=True, help="Путь к sot.db")
     ap.add_argument("--url", default=os.environ.get("LAWDESK_URL", "http://127.0.0.1:8000"))
@@ -226,7 +227,7 @@ def main() -> None:
     con = connect_ro(a.db)
     if a.schema:
         print_schema(con)
-        return
+        return 0
     r = resolve_mapping(con)
     print("Сопоставление:", json.dumps(r["map"], ensure_ascii=False, indent=1))
     for p in r["problems"]:
@@ -246,13 +247,13 @@ def main() -> None:
     if a.dry_run:
         print("Пример дела:", json.dumps(cases[0][1] if cases else None, ensure_ascii=False))
         print("Пример наблюдения:", json.dumps(values[0] if values else None, ensure_ascii=False))
-        return
+        return 0
     if not a.key:
         raise SystemExit("Нужен API-ключ: --key или LAWDESK_KEY")
 
     ld = Lawdesk(a.url, a.key)
     res = ld.cases(it for _, it in cases)
-    bad = [x for x in res if not x["ok"]]
+    bad = bad_cases = [x for x in res if not x["ok"]]
     warn = [w for x in res if x["ok"] for w in x.get("warnings", [])]
     print(f"Дела: отправлено {len(res)}, создано {sum(x.get('created', False) for x in res if x['ok'])}, ошибок {len(bad)}, предупреждений {len(warn)}")
     for x in bad[:20]:
@@ -264,7 +265,8 @@ def main() -> None:
     print(f"Наблюдения: отправлено {len(res)}, ошибок {len(bad)}; статусы: {dict(Counter(x['status'] for x in res if x['ok']))}")
     for x in bad[:20]:
         print("  ошибка:", x)
+    return 1 if bad or bad_cases else 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

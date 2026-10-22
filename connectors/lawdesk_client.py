@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import mimetypes
+import os
 import ssl
 import time
 import urllib.error
@@ -36,8 +37,42 @@ class LawdeskError(Exception):
         self.status, self.detail = status, detail
 
 
+# Паузы между повторами при временных сбоях (перезапуск сервера, обрыв сети): ~1,5 минуты в сумме
+RETRY_DELAYS = (2, 5, 10, 20, 40)
+RETRY_STATUS = {429, 500, 502, 503, 504}
+
+
+def _ssl_problem(e: BaseException) -> bool:
+    return isinstance(getattr(e, "reason", e), ssl.SSLError)
+
+
+def read_cursor(path: str | Path, default: int = 0) -> int:
+    """Курсор ленты из файла. Пустой или испорченный файл — ошибка, а не «начать с нуля»:
+    иначе вся история изменений молча ушла бы во внешнюю систему повторно."""
+    p = Path(path)
+    if not p.exists():
+        return default
+    text = p.read_text(encoding="utf-8").strip()
+    if not text.isdigit():
+        raise ValueError(f"файл курсора {p} пустой или испорчен («{text[:20]}»). Впишите в него номер последнего "
+                         f"выгруженного события (см. журнал прошлого запуска) или удалите файл, чтобы начать с начала")
+    return int(text)
+
+
+def write_cursor(path: str | Path, value: int) -> None:
+    """Записать курсор атомарно: обрыв посреди записи не оставит пустой файл."""
+    p = Path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_name(p.name + ".tmp")
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write(str(value))
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, p)
+
+
 class Lawdesk:
-    def __init__(self, base_url: str, key: str, timeout: float = 60, cafile: str | None = None, batch: int = 500):
+    def __init__(self, base_url: str, key: str, timeout: float = 180, cafile: str | None = None, batch: int = 500):
         self.base = base_url.rstrip("/")
         self.key, self.timeout, self.batch = key, timeout, batch
         self.ctx = ssl.create_default_context(cafile=cafile) if cafile else None
@@ -45,14 +80,16 @@ class Lawdesk:
     # --- транспорт ----------------------------------------------------------------------------
 
     def request(self, method: str, path: str, body=None, params: dict | None = None,
-                data: bytes | None = None, content_type: str | None = None, retries: int = 3):
+                data: bytes | None = None, content_type: str | None = None, retries: int | None = None):
         url = self.base + path + ("?" + urllib.parse.urlencode({k: v for k, v in (params or {}).items() if v is not None}) if params else "")
         if body is not None:
             data, content_type = json.dumps(body, ensure_ascii=False, default=str).encode(), "application/json"
         headers = {"Authorization": f"Bearer {self.key}", "Accept": "application/json"}
         if content_type:
             headers["Content-Type"] = content_type
-        for attempt in range(retries + 1):
+        # повторы безопасны: приём данных идемпотентен (повторная отправка ничего не дублирует)
+        delays = RETRY_DELAYS if retries is None else RETRY_DELAYS[:retries]
+        for attempt in range(len(delays) + 1):
             req = urllib.request.Request(url, data=data, method=method, headers=headers)
             try:
                 with urllib.request.urlopen(req, timeout=self.timeout, context=self.ctx) as r:
@@ -66,26 +103,43 @@ class Lawdesk:
                     detail = json.loads(detail).get("detail", detail)
                 except (ValueError, AttributeError):
                     pass
-                if e.code in (502, 503, 504) and attempt < retries:
-                    time.sleep(2 ** attempt)
+                if e.code in RETRY_STATUS and attempt < len(delays):
+                    time.sleep(delays[attempt])
                     continue
                 raise LawdeskError(e.code, detail) from None
-            except urllib.error.URLError:
-                if attempt < retries:
-                    time.sleep(2 ** attempt)
+            except (urllib.error.URLError, TimeoutError, ConnectionError) as e:
+                if _ssl_problem(e):  # сертификат не изменится от повтора
+                    raise urllib.error.URLError(f"{getattr(e, 'reason', e)} — сертификат сервера не прошёл проверку; "
+                                                f"укажите файл корневого сертификата компании: cafile = \"…\"") from None
+                if attempt < len(delays):
+                    time.sleep(delays[attempt])
                     continue
                 raise
 
     def _batched(self, path: str, items: Iterable[dict]) -> list[dict]:
+        """Отправка пакетами. Результат — по одному на элемент, в том же порядке, что items."""
         out, chunk = [], []
         for it in items:
             chunk.append(it)
             if len(chunk) >= self.batch:
-                out += self.request("POST", path, chunk)
+                out += self._send(path, chunk)
                 chunk = []
         if chunk:
-            out += self.request("POST", path, chunk)
+            out += self._send(path, chunk)
         return out
+
+    def _send(self, path: str, chunk: list[dict]) -> list[dict]:
+        """Сервер проверяет формат всего пакета сразу: одна строка с неверной датой даёт 422 на весь пакет.
+        Тогда пакет делится пополам, пока плохие элементы не останутся по одному — остальные проходят."""
+        try:
+            return self.request("POST", path, chunk)
+        except LawdeskError as e:
+            if e.status != 422:
+                raise
+            if len(chunk) == 1:
+                return [{"index": 0, "ok": False, "error": _format_422(e.detail)}]
+            mid = len(chunk) // 2
+            return self._send(path, chunk[:mid]) + self._send(path, chunk[mid:])
 
     # --- приём данных -------------------------------------------------------------------------
 
@@ -134,15 +188,14 @@ class Lawdesk:
 
     def follow_changes(self, cursor_file: str | Path, actions: str | None = None) -> Iterator[dict]:
         """Читать ленту с сохранённого курсора; курсор пишется в файл после каждой порции."""
-        cf = Path(cursor_file)
-        cursor = int(cf.read_text()) if cf.exists() else 0
+        cursor = read_cursor(cursor_file)
         while True:
             page = self.changes(cursor, actions)
             yield from page["items"]
             if page["next_cursor"] == cursor:
                 return
             cursor = page["next_cursor"]
-            cf.write_text(str(cursor))
+            write_cursor(cursor_file, cursor)
 
     # --- очередь задач ------------------------------------------------------------------------
 
@@ -175,6 +228,18 @@ class Lawdesk:
                 if not t.finished:
                     t.done(result or {})
             n += 1
+
+
+def _format_422(detail) -> str:
+    """Ошибки проверки формата → «поле act_date: Input should be a valid date (получено «01.02.2027»)»."""
+    if not isinstance(detail, list):
+        return str(detail)
+    parts = []
+    for d in detail:
+        loc = [str(x) for x in d.get("loc", []) if x != "body" and not isinstance(x, int)]
+        got = f" (получено «{d['input']}»)" if "input" in d and not isinstance(d["input"], (dict, list)) else ""
+        parts.append(f"поле {'.'.join(loc) or '?'}: {d.get('msg', '')}{got}")
+    return "; ".join(parts)
 
 
 class Task:

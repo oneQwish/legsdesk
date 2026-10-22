@@ -13,6 +13,13 @@ import lawdesk_connect as lc  # noqa: E402
 EXAMPLES = Path(__file__).resolve().parents[1] / "примеры"
 
 
+@pytest.fixture(autouse=True)
+def no_retry_pauses(monkeypatch):
+    import lawdesk_client
+    monkeypatch.setattr(lc, "RETRY_DELAYS", (0, 0))
+    monkeypatch.setattr(lawdesk_client, "RETRY_DELAYS", (0, 0))
+
+
 # --- шаблоны и фильтры ---------------------------------------------------------------------
 
 @pytest.mark.parametrize("tpl,row,expected", [
@@ -239,3 +246,142 @@ url = "{url}/in"
     with pytest.raises(lc.LinkError):
         lc.run_out(bad, tmp_path, FakeLawdesk(), None, dry=False)
     assert not (tmp_path / "плохой.txt").exists()
+
+
+# --- надёжность (аудит) ------------------------------------------------------------------
+
+def test_csv_cp1251_and_datetime(tmp_path):
+    (tmp_path / "a.csv").write_bytes("Дата;Сумма\n2027-01-01 00:00:00;1 234,5\n".encode("cp1251"))
+    rows = list(lc.read_rows({"type": "csv", "path": "a.csv"}, tmp_path))
+    assert rows[0]["Дата"] == "2027-01-01 00:00:00"
+    assert lc.render("{Дата|date}", rows[0], {}) == "2027-01-01"
+    assert lc.render("{Сумма|money}", rows[0], {}) == "1234.50"
+    with pytest.raises(lc.ConfigError, match="кодировке"):
+        list(lc.read_rows({"type": "csv", "path": "a.csv", "encoding": "utf-8"}, tmp_path))
+
+
+def test_empty_reference_message():
+    with pytest.raises(KeyError, match="не заполнено"):
+        lc.render("{Суд.Code}", {"Суд": None}, {})
+
+
+def test_cursor_file_corrupt_is_error(tmp_path):
+    (tmp_path / "к.txt").write_text("")
+    cfg = lc.load_config(write(tmp_path, OUT_CSV))
+    with pytest.raises(lc.ConfigError, match="испорчен"):
+        lc.run_out(cfg, tmp_path, FakeLawdesk(), None, dry=False)
+
+
+OUT_CSV = """
+[connector]
+name = "т"
+direction = "out"
+[feed]
+state_file = "к.txt"
+[sink]
+type = "csv"
+path = "out.csv"
+[sink.columns]
+"Значение" = "{value}"
+"""
+
+
+def test_csv_new_does_not_overwrite_unclaimed_file(tmp_path):
+    (tmp_path / "out.csv").write_text("вчерашнее", encoding="utf-8")
+    cfg = lc.load_config(write(tmp_path, OUT_CSV))
+    lc.run_out(cfg, tmp_path, FakeLawdesk(), None, dry=False)
+    assert (tmp_path / "out.csv").read_text(encoding="utf-8") == "вчерашнее"
+    assert len(list(tmp_path.glob("out_*.csv"))) == 1
+
+
+def test_out_cursor_saved_per_portion(tmp_path):
+    class Paged(FakeLawdesk):
+        def changes(self, after, actions, limit=500):
+            items = [e for e in self.events if e["feed_seq"] > after][:2]  # по 2 события
+            return {"items": items, "next_cursor": items[-1]["feed_seq"] if items else after}
+
+    calls = []
+
+    class Broken(lc.SinkWriter):
+        def write(self, rows, ids):
+            calls.append(ids)
+            if len(calls) == 2:
+                raise lc.LinkError("обрыв")
+            super().write(rows, ids)
+
+    cfg = lc.load_config(write(tmp_path, OUT_CSV))
+    orig, lc.SinkWriter = lc.SinkWriter, Broken
+    try:
+        with pytest.raises(lc.LinkError):
+            lc.run_out(cfg, tmp_path, Paged(), None, dry=False)
+    finally:
+        lc.SinkWriter = orig
+    assert (tmp_path / "к.txt").read_text() == "2"  # первая порция записана и учтена, вторая — нет
+    lc.run_out(cfg, tmp_path, Paged(), None, dry=False)
+    assert (tmp_path / "к.txt").read_text() == "4"
+
+
+def test_temporary_case_error_does_not_move_cursor(tmp_path):
+    class Flaky(FakeLawdesk):
+        def get_case(self, cid):
+            raise lc.LawdeskError(503, "перезапуск")
+
+    cfg = lc.load_config(write(tmp_path, OUT_CSV))
+    with pytest.raises(lc.LawdeskError):
+        lc.run_out(cfg, tmp_path, Flaky(), None, dry=False)
+    assert not (tmp_path / "к.txt").exists()
+
+
+def test_http_sink_sends_event_ids(tmp_path, mock_server):
+    url, received = mock_server
+    cfg = lc.load_config(write(tmp_path, f"""
+[connector]
+name = "т"
+direction = "out"
+[sink]
+type = "http"
+url = "{url}/in"
+"""))
+    lc.run_out(cfg, tmp_path, FakeLawdesk(), None, dry=False)
+    assert received[-1]["ids"] == [1, 2, 3, 4]
+
+
+def test_run_lock(tmp_path):
+    with lc.RunLock(tmp_path / "x.замок"):
+        with pytest.raises(lc.AlreadyRunning):
+            with lc.RunLock(tmp_path / "x.замок"):
+                pass
+    with lc.RunLock(tmp_path / "x.замок"):  # после выхода замок свободен
+        pass
+
+
+def test_batch_with_bad_item_is_split(monkeypatch):
+    import lawdesk_client as cl
+    sent = []
+
+    def fake(self, method, path, body=None, **kw):
+        sent.append(len(body))
+        if any(x.get("bad") for x in body):
+            raise cl.LawdeskError(422, [{"loc": ["body", 0, "act_date"], "msg": "Input should be a valid date", "input": "01.02.2027"}])
+        return [{"index": i, "ok": True} for i in range(len(body))]
+
+    monkeypatch.setattr(cl.Lawdesk, "request", fake)
+    ld = cl.Lawdesk("http://x", "k")
+    res = ld.documents([{"n": i, "bad": i == 5} for i in range(8)])
+    assert [r["ok"] for r in res] == [True] * 5 + [False] + [True] * 2
+    assert "act_date" in res[5]["error"] and "01.02.2027" in res[5]["error"]
+
+
+def test_unexpected_error_exit_code(tmp_path):
+    (tmp_path / "a.json").write_text("{ сломано", encoding="utf-8")
+    write(tmp_path, """
+[connector]
+name = "т"
+[source]
+type = "json"
+path = "a.json"
+[cases]
+uid = "{uid}"
+""", "c.toml")
+    assert lc.main(["x", "проверить", str(tmp_path / "c.toml")]) == lc.EXIT_UNEXPECTED
+    assert lc.main(["x", "проверить", str(tmp_path / "c.toml"), "--limit"]) == lc.EXIT_CONFIG
