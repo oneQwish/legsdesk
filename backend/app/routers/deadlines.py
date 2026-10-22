@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from .. import deadlines as dl
 from ..db import get_db
+from ..filters import CaseFilter
 from ..logic import log
 from ..models import CalendarDay, Case, Deadline
 from ..schemas import CalendarIn, DeadlinePatch, DeadlineOut, DeadlineWithCase
@@ -22,10 +23,11 @@ def list_deadlines(
     assignee: str = "",
     kind: str = "",
     limit: int = Query(500, le=5000),
+    f: CaseFilter = Depends(CaseFilter.dep),
     db: Session = Depends(get_db),
     _: Principal = Depends(require(role="viewer", scope="read")),
 ):
-    stmt = select(Deadline).options(selectinload(Deadline.case))
+    stmt = select(Deadline).join(Case).options(selectinload(Deadline.case)).where(*f.where())
     if status:
         stmt = stmt.where(Deadline.status.in_(status.split(",")))
     if due_before:

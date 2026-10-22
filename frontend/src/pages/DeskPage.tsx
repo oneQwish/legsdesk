@@ -1,7 +1,9 @@
 import { Link } from "react-router-dom";
 import { Topbar, useSession } from "../App";
 import { api, qs, type CaseBrief, type Page } from "../api";
+import { VIEW_COLORS, type SavedView } from "../components/FilterPanel";
 import Pile from "../components/Pile";
+import { useToast } from "../components/overlay";
 import { useLoad } from "../components/ui";
 
 const iso = (d: Date) => d.toISOString().slice(0, 10);
@@ -21,13 +23,20 @@ export default function DeskPage() {
   const mine = usePile({ responsible: me.login, sort: "next_due" });
   const noUid = usePile({ has_uid: false, sort: "-updated_at" });
   const recent = usePile({ sort: "-updated_at" });
+  const views = useLoad(() => api<SavedView[]>("/views"), []);
+  const toast = useToast();
+  const removeFromDesk = async (v: SavedView) => {
+    await api(`/views/${v.id}`, { method: "PATCH", json: { on_desk: false } });
+    views.reload();
+    toast(`«${v.name}» убрана со стола (подборка осталась в фильтрах)`);
+  };
 
   const conflictsN = (stats?.values_by_status.conflict ?? 0) + (stats?.values_by_status.appeal_possible ?? 0);
   const hello = new Date().getHours() < 12 ? "Доброе утро" : new Date().getHours() < 18 ? "Добрый день" : "Добрый вечер";
 
   return (
     <>
-      <Topbar title="Стол" sub={`${hello}, ${me.full_name || me.login}. Дела разложены по стопкам — листайте или разложите пасьянсом.`} />
+      <Topbar title="Стол" sub={<>{hello}, {me.full_name || me.login}. Дела разложены по стопкам — листайте или разложите пасьянсом. Свою стопку можно собрать фильтрами в <Link to="/cases">«Делах»</Link> → «Сохранить подборку».</>} />
       <div className="ribbon">
         <Link to="/deadlines" className={stats?.deadlines_overdue ? "hot" : ""}><div className="v">{stats?.deadlines_overdue ?? "—"}</div><div className="l">сроков просрочено</div></Link>
         <Link to="/deadlines"><div className="v">{stats?.deadlines_week ?? "—"}</div><div className="l">сроков на 7 дней</div></Link>
@@ -36,6 +45,9 @@ export default function DeskPage() {
         <Link to="/documents?unlinked=1"><div className="v">{stats?.documents ?? "—"}</div><div className="l">документов · без дела {stats?.documents_unlinked ?? "—"}</div></Link>
       </div>
       <div className="stacks">
+        {(views.data ?? []).filter((v) => v.on_desk).map((v) => (
+          <ViewPile key={v.id} view={v} onRemove={() => removeFromDesk(v)} />
+        ))}
         <Pile title="Горят сроки" color="var(--seal)" {...hot} empty="Сроков, истекающих в ближайшие 3 дня, нет" />
         <Pile title="Сроки на неделю" color="var(--ochre)" {...week} empty="На ближайшие 10 дней сроков нет" />
         <Pile title="Конфликты на разбор" color="var(--violet)" {...conflicts} empty="Источники ни в чём не расходятся" />
@@ -44,5 +56,20 @@ export default function DeskPage() {
         <Pile title="Недавно изменённые" color="var(--ok)" {...recent} empty="Дел пока нет" />
       </div>
     </>
+  );
+}
+
+/** Стопка из сохранённой подборки фильтров. */
+function ViewPile({ view, onRemove }: { view: SavedView; onRemove: () => void }) {
+  const r = useLoad(() => api<Page<CaseBrief>>(`/cases?${view.params}${view.params ? "&" : ""}size=60&sort=next_due`), [view.params]);
+  return (
+    <div className="view-pile">
+      <Pile title={view.name} color={VIEW_COLORS[view.color] ?? "var(--ink)"} items={r.data?.items ?? []}
+            total={r.data?.total ?? 0} loading={r.loading} empty="По фильтрам подборки дел нет" />
+      <div className="view-pile-actions">
+        <Link to={`/${view.page}?${view.params}`} className="small">открыть с фильтрами</Link>
+        <button className="link small muted" onClick={onRemove}>убрать со стола</button>
+      </div>
+    </div>
   );
 }

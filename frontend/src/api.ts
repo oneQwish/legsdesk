@@ -31,9 +31,16 @@ export async function api<T>(path: string, init: RequestInit & { json?: unknown 
   return body as T;
 }
 
-export function qs(params: Record<string, string | number | boolean | undefined | null>): string {
+type QsValue = string | number | boolean | undefined | null | (string | number)[];
+
+export function qs(params: Record<string, QsValue> | URLSearchParams): string {
   const p = new URLSearchParams();
-  for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== null && v !== "") p.set(k, String(v));
+  if (params instanceof URLSearchParams) params.forEach((v, k) => v !== "" && p.append(k, v));
+  else
+    for (const [k, v] of Object.entries(params)) {
+      if (Array.isArray(v)) v.forEach((x) => p.append(k, String(x)));
+      else if (v !== undefined && v !== null && v !== "") p.set(k, String(v));
+    }
   const s = p.toString();
   return s ? `?${s}` : "";
 }

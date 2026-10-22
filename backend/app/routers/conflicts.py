@@ -3,6 +3,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from ..db import get_db
+from ..filters import CaseFilter
 from ..logic import reopen_value, resolve_value
 from ..models import Case, CaseValue
 from ..schemas import CaseBrief, ConflictOut, Page, ReopenIn, ResolveIn, ValueOut
@@ -15,8 +16,7 @@ router = APIRouter(prefix="/api/v1", tags=["Конфликты"])
 @router.get("/conflicts", response_model=Page[ConflictOut])
 def list_conflicts(
     field: str = "",
-    legal_entity: str = "",
-    court: str = "",
+    f: CaseFilter = Depends(CaseFilter.dep),
     status: str = Query("conflict,appeal_possible"),
     page: int = Query(1, ge=1),
     size: int = Query(20, ge=1, le=200),
@@ -31,10 +31,7 @@ def list_conflicts(
             .where(CaseValue.status.in_(statuses)))
     if field:
         stmt = stmt.where(CaseValue.field == field)
-    if legal_entity:
-        stmt = stmt.where(Case.legal_entity == legal_entity)
-    if court:
-        stmt = stmt.where(Case.court_name.ilike(f"%{court}%"))
+    stmt = stmt.where(*f.where())
     total = db.scalar(select(func.count()).select_from(stmt.subquery()))
     rows = db.scalars(stmt.options(selectinload(CaseValue.observations), selectinload(CaseValue.case))
                       .order_by(per_case.c.n.desc(), Case.id, CaseValue.field)

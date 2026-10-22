@@ -1,7 +1,8 @@
 import { useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { Topbar, useSession } from "../App";
 import { api, daysLeft, fmtDate, qs, type Deadline } from "../api";
+import { ActiveChips, FilterButton, filterParams } from "../components/FilterPanel";
 import { DueBadge, ErrorBox, useLoad } from "../components/ui";
 
 const KIND_LABEL: Record<string, string> = {
@@ -18,7 +19,12 @@ export default function DeadlinesPage() {
   const { can, refreshStats } = useSession();
   const [status, setStatus] = useState("open");
   const [kind, setKind] = useState("");
-  const list = useLoad(() => api<Deadline[]>(`/deadlines${qs({ status, kind, limit: 2000 })}`), [status, kind]);
+  const [sp] = useSearchParams();
+  const fp = filterParams(sp);
+  fp.set("limit", "2000");
+  if (status) fp.set("status", status);
+  if (kind) fp.set("kind", kind);
+  const list = useLoad(() => api<Deadline[]>(`/deadlines${qs(fp)}`), [fp.toString()]);
 
   const groups: [string, Deadline[]][] = [
     ["Просрочено", []],
@@ -49,7 +55,9 @@ export default function DeadlinesPage() {
         <option value="done">Выполненные</option>
         <option value="cancelled">Снятые</option>
       </select>
+        <FilterButton page="deadlines" />
       </Topbar>
+      <ActiveChips />
       <ErrorBox error={list.error} />
       <div className="stack">
         {groups.filter(([, items]) => items.length).map(([title, items]) => (

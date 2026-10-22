@@ -218,3 +218,52 @@ def test_merge_cases(svc, lawyer):
     assert lawyer.get(f"/api/v1/cases/{b}").status_code == 404
     found = lawyer.get("/api/v1/cases", params={"q": "4522"}).json()
     assert found["total"] == 1 and found["items"][0]["id"] == a
+
+
+def test_filters_facets_and_views(svc, lawyer, viewer):
+    def case(uid, num, building, entity, debt, judge_a, judge_b):
+        svc.post("/api/v1/ingest/cases", json=[{"uid": uid, "court_code": "C1", "court_name": "Суд 1", "case_number": num,
+                                                 "building": building, "legal_entity": entity}]).raise_for_status()
+        svc.post("/api/v1/ingest/observations", json=[
+            {"uid": uid, "field": "amount_debt", "source": "1С", "value": debt},
+            {"uid": uid, "field": "judge", "source": "1С", "value": judge_a},
+            {"uid": uid, "field": "judge", "source": "OCR", "value": judge_b}])
+    case("U1", "2-1/2023", "401", "ГС-Саввино", "141 611,96 руб.", "Иванова", "Иванова")
+    case("U2", "2-2/24", "401", "ГС-СПб", "900000", "Петров", "Сидоров")
+    case("U3", "2-3/24", "308", "ГС-Саввино", "50000", "Петров", "Петров")
+    svc.post("/api/v1/ingest/cases", json=[{"court_code": "C1", "case_number": "2-4/24", "building": "308"}])
+
+    total = lambda qs: lawyer.get(f"/api/v1/cases?{qs}").json()["total"]  # noqa: E731
+    assert total("building=401") == 2
+    assert total("building=401&building=308") == 4
+    assert total("year=2023") == 1 and total("year=2024") == 3
+    assert total("sum_field=amount_debt&sum_min=100000") == 2          # 141 611,96 и 900 000
+    assert total("sum_field=amount_debt&sum_min=100000&sum_max=200000") == 1
+    assert total("conflict_field=judge") == 1
+    assert total("has_uid=false") == 1
+    assert total("legal_entity=—") == 1                                # «не указано»
+    assert total("building=401&has_conflicts=false") == 1
+
+    f = lawyer.get("/api/v1/cases/facets?building=401").json()
+    assert f["total"] == 2
+    # счётчики фасета не учитывают его собственный выбор
+    assert {x["value"]: x["count"] for x in f["facets"]["building"]} == {"401": 2, "308": 2}
+    assert {x["value"]: x["count"] for x in f["facets"]["legal_entity"]} == {"ГС-Саввино": 1, "ГС-СПб": 1}
+    assert f["flags"]["has_conflicts"] == {"true": 1, "false": 1}
+    # регрессия: EXISTS-условия вместе с фасетами, присоединяющими те же таблицы
+    r = lawyer.get("/api/v1/cases/facets?has_conflicts=true&sum_field=amount_debt&sum_min=1&deadline_kind=appeal&act_type=решение&overdue=true")
+    assert r.status_code == 200, r.text
+    assert {x["value"] for x in lawyer.get("/api/v1/cases/facets?has_conflicts=true").json()["facets"]["conflict_field"]} == {"judge"}
+
+    # конфликты и сроки понимают те же фильтры
+    assert lawyer.get("/api/v1/conflicts?legal_entity=ГС-Саввино").json()["total"] == 0
+    assert lawyer.get("/api/v1/conflicts?building=401").json()["total"] == 1
+
+    # подборки — личные
+    v = lawyer.post("/api/v1/views", json={"name": "Корпус 401", "params": "building=401", "color": "seal"}).json()
+    assert [x["name"] for x in lawyer.get("/api/v1/views").json()] == ["Корпус 401"]
+    assert viewer.get("/api/v1/views").json() == []
+    assert viewer.delete(f"/api/v1/views/{v['id']}").status_code == 404
+    lawyer.patch(f"/api/v1/views/{v['id']}", json={"on_desk": False})
+    assert lawyer.get("/api/v1/views").json()[0]["on_desk"] is False
+    assert lawyer.delete(f"/api/v1/views/{v['id']}").status_code == 204

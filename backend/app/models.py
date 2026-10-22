@@ -258,3 +258,18 @@ class Event(Base):
     # Номер в ленте изменений: присваивается при чтении ленты только видимым (зафиксированным) строкам,
     # поэтому порядок ленты = порядок фиксации, и событие из долгой транзакции не проскакивает мимо курсора.
     feed_seq: Mapped[int | None] = mapped_column(BigInteger, index=True, unique=True)
+
+
+class SavedView(Base):
+    """Сохранённая подборка фильтров пользователя; on_desk — показывать стопкой на «Столе»."""
+
+    __tablename__ = "saved_views"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(128))
+    page: Mapped[str] = mapped_column(String(32), default="cases")  # cases | conflicts | deadlines
+    params: Mapped[str] = mapped_column(Text, default="")  # строка запроса фильтров, как в адресе страницы
+    on_desk: Mapped[bool] = mapped_column(Boolean, default=True)
+    color: Mapped[str] = mapped_column(String(16), default="ink")
+    position: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

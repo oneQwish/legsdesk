@@ -7,7 +7,8 @@ from sqlalchemy.orm import Session, selectinload
 from .. import deadlines as dl
 from ..db import get_db
 from ..fields import FIELDS, field_def
-from ..logic import log, merge_cases, search_cases_filter
+from ..filters import CaseFilter, facet_counts, flags
+from ..logic import log, merge_cases
 from ..models import Case, CaseValue, Deadline, Document, Event
 from ..schemas import (CaseBrief, CaseOut, CasePatch, DeadlineIn, DeadlineOut, DocumentBrief, EventOut, Page,
                        ValueOut)
@@ -52,41 +53,16 @@ def fields(_: Principal = Depends(require(role="viewer", scope="read"))):
 
 @router.get("/cases", response_model=Page[CaseBrief])
 def list_cases(
-    q: str = "",
-    court: str = "",
-    legal_entity: str = "",
-    building: str = "",
-    stage: str = "",
-    responsible: str = "",
-    has_conflicts: bool | None = None,
-    has_uid: bool | None = None,
-    due_before: date | None = None,
+    f: CaseFilter = Depends(CaseFilter.dep),
     sort: str = Query("-updated_at", pattern="^-?(updated_at|case_number|conflicts|next_due|id)$"),
     page: int = Query(1, ge=1),
     size: int = Query(50, ge=1, le=500),
     db: Session = Depends(get_db),
     _: Principal = Depends(require(role="viewer", scope="read")),
 ):
+    """Реестр дел. Все фильтры — см. CaseFilter (списочные параметры повторяются: ?building=401&building=308)."""
     stmt = select(Case, conflicts_sq.label("conflicts"), open_dl_sq.label("open_dl"), next_due_sq.label("next_due"),
-                  next_title_sq.label("next_title"))
-    if q:
-        stmt = stmt.where(search_cases_filter(q))
-    if court:
-        stmt = stmt.where(Case.court_name.ilike(f"%{court}%") | (Case.court_code == court))
-    if legal_entity:
-        stmt = stmt.where(Case.legal_entity == legal_entity)
-    if building:
-        stmt = stmt.where(Case.building == building)
-    if stage:
-        stmt = stmt.where(Case.stage == stage)
-    if responsible:
-        stmt = stmt.where(Case.responsible == responsible)
-    if has_conflicts is not None:
-        stmt = stmt.where((conflicts_sq > 0) if has_conflicts else (conflicts_sq == 0))
-    if due_before is not None:
-        stmt = stmt.where(next_due_sq <= due_before)
-    if has_uid is not None:
-        stmt = stmt.where(Case.uid.is_not(None) if has_uid else Case.uid.is_(None))
+                  next_title_sq.label("next_title")).where(*f.where())
     total = db.scalar(select(func.count()).select_from(stmt.subquery()))
     key = sort.lstrip("-")
     col = {"updated_at": Case.updated_at, "case_number": Case.case_number, "id": Case.id,
@@ -97,12 +73,12 @@ def list_cases(
 
 
 @router.get("/cases/facets")
-def facets(db: Session = Depends(get_db), _: Principal = Depends(require(role="viewer", scope="read"))):
-    """Значения для фильтров реестра."""
-    def distinct(col):
-        return [r[0] for r in db.execute(select(col, func.count()).where(col != "").group_by(col).order_by(func.count().desc()).limit(300))]
-    return {"legal_entity": distinct(Case.legal_entity), "stage": distinct(Case.stage),
-            "responsible": distinct(Case.responsible), "building": distinct(Case.building)}
+def facets(f: CaseFilter = Depends(CaseFilter.dep), db: Session = Depends(get_db),
+           _: Principal = Depends(require(role="viewer", scope="read"))):
+    """Значения фильтров с числом дел (с учётом остальных выбранных фильтров) и числа для переключателей."""
+    return {"facets": facet_counts(db, f), "flags": flags(db, f),
+            "total": db.scalar(select(func.count(Case.id)).where(*f.where())),
+            "sum_fields": [{"key": x.key, "label": x.label} for x in FIELDS.values() if x.kind == "money"]}
 
 
 def load_case(db: Session, case_id: int) -> Case:

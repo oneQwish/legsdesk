@@ -12,6 +12,7 @@ const P = {
   spread: "M3 4h6v6H3zM11 4h6v6h-6zM3 12h6v5H3zM11 12h6v5h-6z",
   pile: "M5 7h10v10H5zM7 4h10v10",
   table: "M3 4h14v12H3zM3 8h14M3 12h14M8 4v12",
+  filter: "M3 4h14l-5.5 6.5V16l-3 1.5v-7z",
 };
 
 export function Icon({ name, size = 18 }: { name: keyof typeof P; size?: number }) {

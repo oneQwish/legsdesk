@@ -329,6 +329,79 @@ details.rule div { white-space: pre-wrap; margin-top: 4px; font-size: 12px; }
 .login form { width: 100%; max-width: 380px; padding: 30px; display: flex; flex-direction: column; gap: 12px; }
 .login .rail-logo { margin: 0 0 6px; width: 44px; height: 44px; font-size: 20px; }
 
+
+/* ============================================================================================
+   Панель фильтров (фасеты со счётчиками)
+   ============================================================================================ */
+.with-filters { display: grid; grid-template-columns: 292px minmax(0, 1fr); gap: 22px; align-items: start; }
+.filters-panel {
+  position: sticky; top: 12px; max-height: calc(100vh - 24px); overflow: auto; overscroll-behavior: contain;
+  background: var(--paper); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow-1);
+  padding: 14px 14px 18px; scrollbar-width: thin;
+}
+.fp-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.fp-total { font-size: 12.5px; color: var(--muted); margin: 8px 0; }
+.fp-total b { color: var(--ink); font: 700 15px var(--serif); }
+.fp-search { width: 100%; margin-bottom: 6px; }
+.fp-find { width: 100%; margin-bottom: 6px; font-size: 12.5px; padding: 4px 8px; }
+.fp-sec { border-top: 1px solid var(--line); }
+.fp-sec-head {
+  width: 100%; border: none; background: none; border-radius: 0; padding: 9px 2px; display: flex; gap: 8px; text-align: left;
+  font: 600 12px var(--sans); text-transform: uppercase; letter-spacing: .05em; color: var(--ink-2);
+}
+.fp-sec-head:hover:not(:disabled) { background: none; color: var(--ink); }
+.fp-sec-body { padding: 0 0 10px; }
+.checks { display: flex; flex-direction: column; }
+.check { display: flex; align-items: center; gap: 8px; padding: 3px 4px; border-radius: 6px; cursor: pointer; font-size: 13px; }
+.check:hover { background: var(--paper-2); }
+.check input { margin: 0; accent-color: var(--seal); flex: none; }
+.check i, .chip i, .seg.tiny i { font-style: normal; color: var(--muted); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.check.zero, .chip.zero { opacity: .5; }
+.chips { display: flex; flex-wrap: wrap; gap: 5px; }
+.chip {
+  border: 1px solid var(--line-strong); background: var(--paper); border-radius: 999px; padding: 3px 10px; font-size: 12.5px;
+}
+.chip.on { background: var(--ink); border-color: var(--ink); color: var(--paper); }
+.chip.on i { color: var(--paper); opacity: .7; }
+.flag { display: flex; align-items: center; gap: 6px; padding: 3px 0; font-size: 13px; white-space: nowrap; }
+.seg.tiny { padding: 2px; }
+.seg.tiny button { padding: 2px 8px; font-size: 12px; }
+.range { margin-bottom: 8px; }
+.range input[type=date] { width: 100%; padding: 4px 6px; font-size: 12.5px; }
+.views { display: flex; flex-wrap: wrap; gap: 5px; margin: 4px 0; }
+.view-pill {
+  display: inline-flex; align-items: center; gap: 6px; border-radius: 7px; padding: 4px 9px; font-size: 12.5px;
+  background: var(--paper-2); border: 1px solid var(--line);
+}
+.view-pill.on { border-color: var(--ink); box-shadow: 0 0 0 1px var(--ink); }
+.view-pill.add { border-style: dashed; color: var(--muted); }
+.view-pill .tone, .swatch { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+.swatch { width: 22px; height: 22px; border: 2px solid var(--paper); box-shadow: 0 0 0 1px var(--line-strong); padding: 0; }
+.swatch.on { box-shadow: 0 0 0 2px var(--ink); }
+.active-chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 14px; }
+.achip {
+  display: inline-flex; align-items: center; gap: 4px; background: var(--paper); border: 1px solid var(--line-strong);
+  border-radius: 999px; padding: 2px 4px 2px 10px; font-size: 12.5px; box-shadow: var(--shadow-1);
+}
+.achip button { border: none; background: none; padding: 0 6px; font-size: 15px; line-height: 1; color: var(--muted); border-radius: 50%; }
+.achip button:hover:not(:disabled) { color: var(--seal); background: var(--seal-soft); }
+.results-bar { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
+.filters-btn { display: none; }
+.fp-drawer-back { position: fixed; inset: 0; background: rgba(31, 42, 68, .35); z-index: 45; animation: fade .12s; }
+.fp-drawer-back .filters-panel {
+  position: fixed; left: 0; top: 0; bottom: 0; width: min(340px, 92vw); max-height: none; border-radius: 0 var(--radius) var(--radius) 0;
+  animation: slide-in .18s ease-out;
+}
+@keyframes slide-in { from { transform: translateX(-30px); opacity: 0; } }
+.view-pile-actions { display: flex; gap: 12px; margin-top: 6px; justify-content: flex-end; }
+.badge-count { background: var(--seal); color: #fff; border-radius: 999px; padding: 0 7px; font-size: 11px; font-weight: 700; }
+
+@media (max-width: 1100px) {
+  .with-filters { grid-template-columns: minmax(0, 1fr); }
+  .with-filters > .filters-panel { display: none; }
+  .filters-btn { display: inline-flex; }
+}
+
 /* ============================================================================================
    Телефон: полоса навигации уходит вниз
    ============================================================================================ */

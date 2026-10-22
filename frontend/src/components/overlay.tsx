@@ -1,3 +1,4 @@
+import { createPortal } from "react-dom";
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 
 // --- Модальное окно ----------------------------------------------------------------------------
@@ -10,13 +11,18 @@ export function Modal({ title, onClose, children, footer, width = 480 }: {
   width?: number;
 }) {
   const box = useRef<HTMLDivElement>(null);
+  const close = useRef(onClose);
+  close.current = onClose;
   useEffect(() => {
-    const h = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    const h = (e: KeyboardEvent) => e.key === "Escape" && close.current();
     window.addEventListener("keydown", h);
-    box.current?.querySelector<HTMLElement>("input, select, textarea, button.primary")?.focus();
     return () => window.removeEventListener("keydown", h);
-  }, [onClose]);
-  return (
+  }, []);
+  useEffect(() => {
+    // фокус — только при открытии окна
+    box.current?.querySelector<HTMLElement>("input, select, textarea, button.primary")?.focus();
+  }, []);
+  return createPortal(
     <div className="modal-back" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div className="modal panel" style={{ maxWidth: width }} ref={box} role="dialog" aria-label={title}>
         <div className="modal-head">
@@ -26,7 +32,8 @@ export function Modal({ title, onClose, children, footer, width = 480 }: {
         <div className="modal-body">{children}</div>
         {footer && <div className="modal-foot">{footer}</div>}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

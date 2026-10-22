@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { Topbar, useSession } from "../App";
 import { api, qs, shortCourt, type CaseBrief, type CaseValue, type Page } from "../api";
+import { ActiveChips, FilterButton, filterParams } from "../components/FilterPanel";
 import ResolvePanel from "../components/ResolvePanel";
 import { ErrorBox, Pager, StatusBadge, useLoad } from "../components/ui";
 
@@ -14,7 +15,11 @@ export default function ConflictsPage() {
   const page = Number(sp.get("page") ?? 1);
   const [sel, setSel] = useState(0);
   const fields = useLoad(() => api<{ key: string; label: string }[]>("/fields"), []);
-  const list = useLoad(() => api<Page<Item>>(`/conflicts${qs({ field, page, size: 25 })}`), [field, page]);
+  const fp = filterParams(sp);
+  fp.set("page", String(page));
+  fp.set("size", "25");
+  if (field) fp.set("field", field);
+  const list = useLoad(() => api<Page<Item>>(`/conflicts${qs(fp)}`), [fp.toString()]);
   const items = list.data?.items ?? [];
   const cur = items[sel];
 
@@ -41,11 +46,13 @@ export default function ConflictsPage() {
   return (
     <>
       <Topbar title="Очередь конфликтов" sub="Источники расходятся — выберите верное значение. Решение уходит в журнал и выгрузку для 1С.">
-      <select value={field} onChange={(e) => setSp(e.target.value ? { field: e.target.value } : {})}>
+      <select value={field} onChange={(e) => { const n = new URLSearchParams(sp); n.delete("page"); if (e.target.value) n.set("field", e.target.value); else n.delete("field"); setSp(n); }}>
         <option value="">Все поля</option>
         {fields.data?.map((f) => <option key={f.key} value={f.key}>{f.label}</option>)}
       </select>
+        <FilterButton page="conflicts" />
       </Topbar>
+      <ActiveChips />
       <ErrorBox error={list.error} />
       {list.data && items.length === 0 ? (
         <div className="panel empty-state">Конфликтов нет 🎉</div>
@@ -64,7 +71,7 @@ export default function ConflictsPage() {
               </div>
             ))}
             {list.data && <Pager page={page} size={list.data.size} total={list.data.total}
-                                 onPage={(p) => setSp({ ...(field ? { field } : {}), page: String(p) })} />}
+                                 onPage={(p) => { const n = new URLSearchParams(sp); n.set("page", String(p)); setSp(n); }} />}
           </div>
           {cur && (
             <div className="panel pad stack">
