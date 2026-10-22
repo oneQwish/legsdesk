@@ -81,7 +81,7 @@ export default function QuickSearch({ onClose }: { onClose: () => void }) {
       { group: "Перейти", label: "Документы без дела", run: go("/documents?unlinked=1") },
       { group: "Перейти", label: "Журнал", run: go("/journal") },
       ...(can("admin") ? [{ group: "Перейти", label: "Сервисы и API", run: go("/admin") }] : []),
-      ...(can("lawyer") ? [{ group: "Действие", label: "Выгрузка решений для 1С (XLSX)", run: () => { window.location.href = "/api/v1/export/values?format=xlsx"; } }] : []),
+      ...(can("lawyer") ? [{ group: "Действие", label: "Выгрузка решений юристов (XLSX)", run: () => { window.location.href = "/api/v1/export/values?format=xlsx"; } }] : []),
     ];
     list.push(...(q.trim() ? fixed.filter((c) => matches(`${c.group} ${c.label}`, q)) : fixed));
     for (const c of cases)

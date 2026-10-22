@@ -257,7 +257,7 @@ function DeadlinesTab({ caseId, deadlines, reload }: { caseId: number; deadlines
                 </td>
                 <td className="small" style={{ maxWidth: 420 }}>
                   <details className="rule"><summary>{d.rule.split(":")[0]}</summary><div>{d.rule}</div></details>
-                  {!d.calendar_confirmed && <div className="notice small" style={{ marginTop: 4 }}>Календарь года не загружен из 1С — переносы праздников не учтены</div>}
+                  {!d.calendar_confirmed && <div className="notice small" style={{ marginTop: 4 }}>Производственный календарь года не загружен — переносы праздников не учтены</div>}
                   {d.note && <div className="muted">{d.note}</div>}
                 </td>
                 <td className="small">{d.auto ? "авто" : "вручную"}</td>
@@ -287,7 +287,7 @@ function DeadlinesTab({ caseId, deadlines, reload }: { caseId: number; deadlines
       )}
       {editing && (
         <PromptModal title={`Изменить срок: ${editing.title}`} label="Новая дата" type="date" initial={editing.due_date}
-          hint="После ручной правки срок больше не пересчитывается автоматически (например, при загрузке календаря из 1С)."
+          hint="После ручной правки срок больше не пересчитывается автоматически (например, при загрузке производственного календаря)."
           onClose={() => setEditing(null)}
           onSubmit={async (v) => {
             await patch(editing, { due_date: v });

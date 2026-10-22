@@ -1,0 +1,31 @@
+# =============================================================================================
+# ПРИМЕР: любая СУБД (PostgreSQL, MS SQL Server, Oracle …) через SQL-запрос.
+# Нужно один раз установить:  pip install sqlalchemy  и драйвер:
+#   PostgreSQL — pip install "psycopg[binary]"      строка: postgresql+psycopg://пользователь:пароль@сервер/база
+#   MS SQL     — pip install pyodbc  (+ ODBC Driver 18) строка: mssql+pyodbc://пользователь:пароль@сервер/база?driver=ODBC+Driver+18+for+SQL+Server
+# Строку подключения храните в переменной окружения (url_env), а не в файле.
+# Это удобно, например, для будущей собственной системы или копии базы 1С на MS SQL (только чтение!).
+# =============================================================================================
+
+[connector]
+name = "Внешняя СУБД"
+api_url = "http://127.0.0.1:8000"
+api_key_env = "LAWDESK_KEY"
+direction = "in"
+
+[source]
+type = "sql"
+url_env = "LAWDESK_SQL_URL"
+query = "SELECT uid, court_code, case_number, judge FROM legal_cases WHERE deleted = false"
+
+[cases]
+uid = "{uid}"
+court_code = "{court_code}"
+case_number = "{case_number}"
+
+[observations]
+source = "внешняя система"
+source_ref = "{uid}"
+
+[observations.fields]
+judge = "{judge}"

@@ -17,33 +17,26 @@ class FieldDef:
     group: str
 
 
-FIELDS: dict[str, FieldDef] = {
-    f.key: f
-    for f in [
-        FieldDef("court", "Суд", "text", "Дело"),
-        FieldDef("judge", "Судья", "text", "Дело"),
-        FieldDef("plaintiffs", "Истцы", "list", "Стороны"),
-        FieldDef("defendant", "Ответчик (юрлицо)", "text", "Стороны"),
-        FieldDef("decision_date", "Дата решения", "date", "Дело"),
-        FieldDef("motivated_date", "Дата мотивированного решения", "date", "Дело"),
-        FieldDef("effective_date", "Дата вступления в силу", "date", "Дело"),
-        FieldDef("outcome", "Исход", "text", "Дело"),
-        FieldDef("subject", "Предмет иска", "text", "Дело"),
-        FieldDef("complex", "ЖК", "text", "Объект"),
-        FieldDef("building", "Корпус", "text", "Объект"),
-        FieldDef("flat", "Квартира", "text", "Объект"),
-        FieldDef("contract_no", "Номер договора", "text", "Объект"),
-        FieldDef("claim_total", "Заявлено всего", "money", "Суммы"),
-        FieldDef("amount_debt", "Основной долг", "money", "Суммы"),
-        FieldDef("amount_penalty", "Неустойка", "money", "Суммы"),
-        FieldDef("amount_fine", "Штраф", "money", "Суммы"),
-        FieldDef("amount_moral", "Компенсация морального вреда", "money", "Суммы"),
-        FieldDef("amount_expertise", "Расходы на экспертизу", "money", "Суммы"),
-        FieldDef("amount_postal", "Почтовые расходы", "money", "Суммы"),
-        FieldDef("amount_representative", "Расходы на представителя", "money", "Суммы"),
-        FieldDef("amount_duty", "Госпошлина", "money", "Суммы"),
-    ]
-}
+def _load_fields() -> dict[str, FieldDef]:
+    """Справочник полей — из fields.toml (рядом с папкой app или по пути LAWDESK_FIELDS_FILE).
+    Новое поле добавляется правкой файла и перезапуском сервера, программировать не нужно."""
+    import os
+    import tomllib
+    from pathlib import Path
+
+    path = Path(os.environ.get("LAWDESK_FIELDS_FILE", Path(__file__).resolve().parents[1] / "fields.toml"))
+    with open(path, "rb") as f:
+        data = tomllib.load(f)
+    out: dict[str, FieldDef] = {}
+    for key, spec in data.get("field", {}).items():
+        kind = spec.get("kind", "text")
+        if kind not in ("text", "money", "date", "list"):
+            raise ValueError(f"fields.toml: у поля {key} тип «{kind}»; допустимо text, money, date, list")
+        out[key] = FieldDef(key, spec.get("label", key), kind, spec.get("group", "Прочее"))
+    return out
+
+
+FIELDS: dict[str, FieldDef] = _load_fields()
 
 
 def field_def(key: str) -> FieldDef:

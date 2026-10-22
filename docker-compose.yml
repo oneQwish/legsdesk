@@ -23,6 +23,7 @@ services:
       LAWDESK_COOKIE_SECURE: "true"
     volumes:
       - storage:/data/storage   # локальное хранилище файлов, пока не подключён 1С:Документооборот
+      - ./backend/fields.toml:/app/fields.toml:ro   # справочник полей: правка + docker compose restart backend
     depends_on:
       db:
         condition: service_healthy

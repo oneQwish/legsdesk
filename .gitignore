@@ -11,3 +11,9 @@ certs/*.key
 *.tsbuildinfo
 storage/
 .venv
+connectors/секреты.bat
+connectors/секреты.sh
+connectors/**/журналы/
+connectors/**/состояние/
+connectors/**/выгрузки/
+connectors/**/ключ.txt

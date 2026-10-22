@@ -45,7 +45,7 @@ export default function DeadlinesPage() {
 
   return (
     <>
-      <Topbar title="Сроки" sub="По ГПК РФ из актов дела и производственному календарю 1С. «*» — календарь года не загружен.">
+      <Topbar title="Сроки" sub="По ГПК РФ из актов дела и производственному календарю (из 1С или другой системы). «*» — календарь года не загружен.">
       <select value={kind} onChange={(e) => setKind(e.target.value)}>
         <option value="">Все виды</option>
         {Object.entries(KIND_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
@@ -70,7 +70,7 @@ export default function DeadlinesPage() {
                   {items.map((d) => (
                     <tr key={d.id}>
                       <td className="nowrap">
-                        <b>{fmtDate(d.due_date)}</b>{!d.calendar_confirmed && <span title="Год календаря не загружен из 1С"> *</span>}
+                        <b>{fmtDate(d.due_date)}</b>{!d.calendar_confirmed && <span title="Календарь года не загружен"> *</span>}
                         <div><DueBadge due={d.due_date} status={d.status} /></div>
                       </td>
                       <td>{d.title}<div className="muted small">{KIND_LABEL[d.kind] ?? d.kind}{d.auto ? "" : " · вручную"}</div></td>

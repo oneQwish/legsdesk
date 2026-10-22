@@ -45,7 +45,7 @@ export default function ConflictsPage() {
 
   return (
     <>
-      <Topbar title="Очередь конфликтов" sub="Источники расходятся — выберите верное значение. Решение уходит в журнал и выгрузку для 1С.">
+      <Topbar title="Очередь конфликтов" sub="Источники расходятся — выберите верное значение. Решение уходит в журнал и во внешние системы через коннекторы.">
       <select value={field} onChange={(e) => { const n = new URLSearchParams(sp); n.delete("page"); if (e.target.value) n.set("field", e.target.value); else n.delete("field"); setSp(n); }}>
         <option value="">Все поля</option>
         {fields.data?.map((f) => <option key={f.key} value={f.key}>{f.label}</option>)}

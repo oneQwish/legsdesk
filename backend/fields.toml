@@ -1,0 +1,124 @@
+# =============================================================================================
+# Справочник полей дела, которые сверяются по источникам (1С, отчёт, OCR, письмо, …).
+#
+# Как добавить поле (например, «Расходы на юриста»):
+#   1. Допишите блок по образцу ниже. Ключ в [field.ключ] — латиницей, без пробелов, навсегда:
+#      по нему поле передают коннекторы и выгрузки. Подпись (label) можно менять когда угодно.
+#   2. Перезапустите сервер (docker compose restart backend).
+#   3. В коннекторе укажите новое поле в [observations.fields]:  lawyer_fee = "{Расходы на юриста|money}"
+#
+# Типы (kind): text — текст, money — сумма (сравнивается до копейки, участвует в «присуждено»),
+#              date — дата, list — список через «;» (порядок не важен, например истцы).
+# Порядок блоков = порядок полей в карточке дела. group — заголовок группы в карточке.
+# Удалять поле, по которому уже есть данные, не нужно — просто перестаньте его присылать.
+# =============================================================================================
+
+[field.court]
+label = "Суд"
+kind = "text"
+group = "Дело"
+
+[field.judge]
+label = "Судья"
+kind = "text"
+group = "Дело"
+
+[field.decision_date]
+label = "Дата решения"
+kind = "date"
+group = "Дело"
+
+[field.motivated_date]
+label = "Дата мотивированного решения"
+kind = "date"
+group = "Дело"
+
+[field.effective_date]
+label = "Дата вступления в силу"
+kind = "date"
+group = "Дело"
+
+[field.outcome]
+label = "Исход"
+kind = "text"
+group = "Дело"
+
+[field.subject]
+label = "Предмет иска"
+kind = "text"
+group = "Дело"
+
+[field.plaintiffs]
+label = "Истцы"
+kind = "list"
+group = "Стороны"
+
+[field.defendant]
+label = "Ответчик (юрлицо)"
+kind = "text"
+group = "Стороны"
+
+[field.complex]
+label = "ЖК"
+kind = "text"
+group = "Объект"
+
+[field.building]
+label = "Корпус"
+kind = "text"
+group = "Объект"
+
+[field.flat]
+label = "Квартира"
+kind = "text"
+group = "Объект"
+
+[field.contract_no]
+label = "Номер договора"
+kind = "text"
+group = "Объект"
+
+[field.claim_total]
+label = "Заявлено всего"
+kind = "money"
+group = "Суммы"
+
+[field.amount_debt]
+label = "Основной долг"
+kind = "money"
+group = "Суммы"
+
+[field.amount_penalty]
+label = "Неустойка"
+kind = "money"
+group = "Суммы"
+
+[field.amount_fine]
+label = "Штраф"
+kind = "money"
+group = "Суммы"
+
+[field.amount_moral]
+label = "Компенсация морального вреда"
+kind = "money"
+group = "Суммы"
+
+[field.amount_expertise]
+label = "Расходы на экспертизу"
+kind = "money"
+group = "Суммы"
+
+[field.amount_postal]
+label = "Почтовые расходы"
+kind = "money"
+group = "Суммы"
+
+[field.amount_representative]
+label = "Расходы на представителя"
+kind = "money"
+group = "Суммы"
+
+[field.amount_duty]
+label = "Госпошлина"
+kind = "money"
+group = "Суммы"

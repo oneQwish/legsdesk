@@ -54,7 +54,7 @@ export default function DayStrip({ days = 14 }: { days?: number }) {
           </button>
         );
       })}
-      {!s.calendar_confirmed && <span className="strip-note" title="Год не загружен из 1С: переносы праздников не учтены">* календарь без переносов</span>}
+      {!s.calendar_confirmed && <span className="strip-note" title="Календарь года не загружен: переносы праздников не учтены">* календарь без переносов</span>}
     </div>
   );
 }

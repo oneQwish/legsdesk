@@ -12,7 +12,7 @@ export default function JournalPage() {
   const list = useLoad(() => api<Page<EventItem>>(`/journal${qs({ action, actor, page, size: 100 })}`), [action, actor, page]);
   return (
     <>
-      <Topbar title="Журнал" sub="Все действия людей и сервисов; решения юристов уходят отсюда в ленту для 1С.">
+      <Topbar title="Журнал" sub="Все действия людей и сервисов; решения юристов уходят отсюда во внешние системы через коннекторы.">
       <input placeholder="Кто (логин/сервис)" value={actor} onChange={(e) => { setActor(e.target.value); setPage(1); }} />
       <select value={action} onChange={(e) => { setAction(e.target.value); setPage(1); }}>
         <option value="">Все действия</option>

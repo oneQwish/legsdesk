@@ -25,7 +25,7 @@
 
 ```
  сервисы конвейера ──REST + API-ключ──▶  FastAPI  ──▶ PostgreSQL
- (OCR, письма, sot_sync, 1С…)  ◀─задачи─┘    │          (дела, поля, наблюдения, документы,
+ (1С, Excel, OCR, письма…)  ◀─задачи─┘    │          (дела, поля, наблюдения, документы,
                                              │           сроки, задачи, журнал/лента)
  юристы (браузер, вход AD) ──HTTPS──▶ nginx ─┤
                                              └──▶ хранилище файлов: локально по sha256 → 1С:ДО
@@ -39,7 +39,7 @@
 * **Журнал = лента изменений**: номер в ленте присваивается при чтении только зафиксированным событиям, поэтому курсор монотонный и без пропусков.
 * **Очередь задач** — в PostgreSQL (`FOR UPDATE SKIP LOCKED`, аренда с продлением, повторы).
 
-Подробно: [docs/integration.md](docs/integration.md) — подключение сервисов; [docs/integration-1c.md](docs/integration-1c.md) — 1С, календарь, Документооборот.
+**Документация — [docs/README.md](docs/README.md)**: как устроено, коннекторы, обмен с 1С (с кодом на встроенном языке), администрирование, путь к замене 1С.
 
 ## Запуск на сервере (Docker)
 
@@ -68,16 +68,24 @@ cd frontend && npm install && npm run dev                                       
 
 Демо-данные (вымышленные, без персональных данных): `LAWDESK_KEY=<ключ> python connectors/demo_seed.py`.
 
-## Подключение sot.db
+## Подключение источников и приёмников (коннекторы)
+
+Обмен с любыми системами — **без программирования**: файл настроек `.toml` + универсальная программа
+`connectors/lawdesk_connect.py` (только стандартная библиотека Python 3.11+).
 
 ```bash
-python connectors/sot_sync.py --db ../sot/sot.db --schema      # схема базы
-python connectors/sot_sync.py --db ../sot/sot.db --dry-run     # проверка сопоставления, ничего не отправляет
-LAWDESK_URL=https://lawdesk.local LAWDESK_KEY=ldk_… python connectors/sot_sync.py --db ../sot/sot.db
+cd connectors
+python lawdesk_connect.py шаблон                                  # список заготовок
+python lawdesk_connect.py проверить примеры/csv.toml              # что прочитано и что будет отправлено
+python lawdesk_connect.py запустить подключения/мой.toml          # выполнить
 ```
 
-`sot.db` открывается только на чтение. Сопоставление таблиц и колонок — в `MAPPING` в начале `sot_sync.py`;
-оно написано по описанию базы из журнала работ и **должно быть сверено** с реальной схемой (`--schema`, `--dry-run`).
+Источники: CSV, Excel, JSON, папка с файлами, OData (1С и др.), HTTP/JSON, SQLite, любая СУБД через SQL.
+Наружу: CSV, JSON, HTTP-сервис (1С, будущая система) — по ленте изменений, без потерь и дублей.
+1С — один из источников и приёмников, а не обязательная часть. Подробно — [docs/коннекторы.md](docs/коннекторы.md).
+
+Специализированный `connectors/sot_sync.py` (sot.db конвейера) остаётся для совместимости;
+для новых подключений используйте `lawdesk_connect.py` (пример — `примеры/sqlite_sot.toml`).
 
 ## Безопасность и данные
 
@@ -93,6 +101,7 @@ backend/app/        FastAPI: models.py (схема), logic.py (дела/поля
                     security.py (AD, сессии, ключи), storage.py (локально / 1С:ДО), routers/ (API)
 backend/tests/      pytest на PostgreSQL
 frontend/src/       React + TypeScript (Vite): pages/, components/
-connectors/         lawdesk_client.py (клиент без зависимостей), sot_sync.py, demo_seed.py
-docs/               руководства по интеграции, скриншоты
+connectors/         lawdesk_connect.py (универсальный коннектор), примеры/, подключения/, запуск.bat/.sh,
+                    lawdesk_client.py (клиент API без зависимостей), sot_sync.py, demo_seed.py, tests/
+docs/               документация (начать с docs/README.md), скриншоты
 ```

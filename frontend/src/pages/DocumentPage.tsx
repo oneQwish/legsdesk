@@ -48,7 +48,7 @@ export default function DocumentPage() {
           <iframe title="Документ" src={`/api/v1/documents/${d.id}/file${page ? `#page=${page}` : ""}`} />
         ) : (
           <div className="panel empty-state">
-            Файл не загружен в хранилище{d.docflow_id ? ` (карточка 1С:ДО ${d.docflow_id})` : ""}.<br />Доступен текст справа.
+            Файл не загружен в хранилище{d.docflow_id ? ` (карточка в системе документооборота: ${d.docflow_id})` : ""}.<br />Доступен текст справа.
           </div>
         )}
         <div className="side stack">

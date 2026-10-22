@@ -9,7 +9,7 @@ export default function AdminPage() {
   const [tab, setTab] = useState<Tab>("services");
   return (
     <>
-      <Topbar title="Сервисы и API" sub="Подключение сервисов автоматизации, очередь задач, выгрузка для 1С." />
+      <Topbar title="Сервисы и API" sub="Подключение сервисов автоматизации, очередь задач, выгрузка во внешние системы." />
       <div className="tabs">
         <button className={tab === "services" ? "on" : ""} onClick={() => setTab("services")}>Сервисы и ключи</button>
         <button className={tab === "tasks" ? "on" : ""} onClick={() => setTab("tasks")}>Очередь задач</button>
@@ -197,8 +197,8 @@ function ExportTab() {
   return (
     <div className="stack">
       <div className="panel pad stack">
-        <h2>Выгрузка для загрузки в 1С</h2>
-        <div className="muted small">Ключ дела — УИД, запасной — код суда 1С + номер. Загрузку в 1С выполняет человек; автоматическая интеграция читает ленту изменений <span className="mono">GET /api/v1/changes</span>.</div>
+        <h2>Выгрузка для внешних систем (1С и др.)</h2>
+        <div className="muted small">Ключ дела — УИД, запасной — код суда + номер. Загружает файл человек; автоматически — коннектор с direction = "out" (docs/коннекторы.md) по ленте изменений <span className="mono">GET /api/v1/changes</span>.</div>
         <div className="row">
           <select value={status} onChange={(e) => setStatus(e.target.value)}>
             <option value="resolved">Только решения юристов</option>
@@ -212,7 +212,7 @@ function ExportTab() {
       </div>
       <div className="panel pad stack">
         <h2>Производственный календарь</h2>
-        <div className="muted small">Загружается сервисом из регламентированного календаря 1С: <span className="mono">PUT /api/v1/calendar</span> (область calendar). Без него сроки считаются по ст. 112 ТК без переносов и помечаются «*».</div>
+        <div className="muted small">Загружается коннектором (из 1С, CSV или другой системы): <span className="mono">PUT /api/v1/calendar</span> (область calendar). Без него сроки считаются по ст. 112 ТК без переносов и помечаются «*».</div>
         {missing.length > 0 && <div className="notice">Не загружен календарь на {missing.join(" и ")} год.</div>}
         <table>
           <thead><tr><th>Год</th><th className="right">Дней</th><th className="right">Нерабочих</th></tr></thead>

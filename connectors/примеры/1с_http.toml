@@ -1,0 +1,37 @@
+# =============================================================================================
+# ПРИМЕР: данные из HTTP-сервиса 1С (или любой другой системы), который отдаёт JSON.
+# Подходит, если OData использовать нельзя или нужен «свой» запрос на стороне 1С.
+# Пример HTTP-сервиса на языке 1С — в docs/api-для-1с.md, раздел «HTTP-сервис для коннектора».
+#
+# Ожидаемый ответ сервиса:
+#   {"items": [ {"uid": "...", "court_code": "...", "number": "...", "judge": "...", ...}, ... ],
+#    "next": "http://.../cases?page=2"}            ← ссылка на следующую страницу (или null)
+# =============================================================================================
+
+[connector]
+name = "1С: HTTP-сервис дел"
+api_url = "http://127.0.0.1:8000"
+api_key_env = "LAWDESK_KEY"
+direction = "in"
+
+[source]
+type = "http_json"
+url = "http://srv-1c/ura/hs/lawdesk/cases"
+user = "lawdesk_reader"
+password_env = "LAWDESK_1C_PASSWORD"
+items_path = "items"                     # где в ответе лежит список записей
+next_path = "next"                       # где ссылка на следующую страницу (если постраничный)
+# params = { changed_since = "2027-01-01" }   # дополнительные параметры запроса
+
+[cases]
+uid = "{uid}"
+court_code = "{court_code}"
+case_number = "{number}"
+
+[observations]
+source = "1С"
+source_ref = "{ref}"
+
+[observations.fields]
+judge = "{judge}"
+claim_total = "{claim|money}"

@@ -1,0 +1,34 @@
+# =============================================================================================
+# ПРИМЕР: значения из базы SQLite (например, sot.db конвейера распознавания).
+# База открывается ТОЛЬКО на чтение. Запрос пишется на SQL — его поправит любой, кто знает запросы 1С:
+# SELECT … FROM … WHERE … почти такой же.
+# Для PostgreSQL / MS SQL — см. sql.toml.
+# =============================================================================================
+
+[connector]
+name = "sot.db: значения OCR и писем"
+api_url = "http://127.0.0.1:8000"
+api_key_env = "LAWDESK_KEY"
+direction = "in"
+
+[source]
+type = "sqlite"
+path = "../../sot/sot.db"
+query = """
+SELECT c.case_uid AS uid, c.court AS court_code, c.case_key AS number,
+       v.field, v.value_ocr, v.value_letter, v.doc_sha256
+FROM case_values v JOIN cases c ON c.case_id = v.case_id
+WHERE v.field = 'долг'
+"""
+
+[cases]
+uid = "{uid}"
+court_code = "{court_code}"
+case_number = "{number}"
+
+[observations]
+source = "OCR"
+source_ref = "{doc_sha256}"
+
+[observations.fields]
+amount_debt = { value = "{value_ocr|money}", document_sha256 = "{doc_sha256}" }

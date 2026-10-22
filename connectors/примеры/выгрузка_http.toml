@@ -1,0 +1,39 @@
+# =============================================================================================
+# ПРИМЕР (наружу): решения юристов → HTTP-сервис другой системы (1С, ваша будущая система, …).
+#
+# Отправляется POST с JSON:
+#   {"source": "lawdesk", "connector": "<name>", "items": [ {колонки из [sink.columns]}, … ]}
+# Приёмник должен вернуть HTTP 200. Если ответ не 200 — курсор НЕ сдвигается и при следующем
+# запуске те же записи уйдут снова, поэтому приёмник должен спокойно принимать повтор
+# (например, по ключу «id» события). Пример HTTP-сервиса на 1С — docs/api-для-1с.md.
+# =============================================================================================
+
+[connector]
+name = "Решения юристов → HTTP"
+api_url = "http://127.0.0.1:8000"
+api_key_env = "LAWDESK_KEY"
+direction = "out"
+
+[feed]
+actions = ["value_resolved", "case_merged", "document_linked"]
+state_file = "состояние/решения_http.курсор"
+
+[sink]
+type = "http"
+url = "http://srv-1c/ura/hs/lawdesk/decisions"
+method = "POST"
+user = "lawdesk_writer"
+password_env = "LAWDESK_1C_PASSWORD"
+batch = 200                              # сколько записей в одном запросе
+
+[sink.columns]
+id = "{id}"
+action = "{action}"
+uid = "{case.uid}"
+court_code = "{case.court_code}"
+case_number = "{case.case_number}"
+field = "{field}"
+value = "{value}"
+note = "{note}"
+author = "{actor}"
+at = "{ts}"

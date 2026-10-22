@@ -1,4 +1,4 @@
-"""Выдача данных наружу: лента изменений (для интеграции с 1С/Юрайт) и выгрузка решений файлом."""
+"""Выдача данных наружу: лента изменений (для любых внешних систем: 1С, будущих систем) и выгрузка решений файлом."""
 import csv
 import io
 from datetime import date, datetime
@@ -74,7 +74,7 @@ def journal(
     return Page[EventOut](items=rows, total=total, page=page, size=size)
 
 
-COLUMNS = ["УИД", "Код суда (1С)", "Суд", "Номер дела", "Другие номера", "Юрлицо", "Поле", "Поле (ключ)",
+COLUMNS = ["УИД", "Код суда", "Суд", "Номер дела", "Другие номера", "Юрлицо", "Поле", "Поле (ключ)",
            "Значение", "Статус", "Кем решено", "Когда", "Комментарий"]
 STATUS_RU = {"resolved": "решено юристом", "confirmed": "подтверждено источниками", "single": "один источник",
              "conflict": "конфликт", "appeal_possible": "возможна апелляция", "empty": "нет данных"}
@@ -104,7 +104,7 @@ def export_values(
     db: Session = Depends(get_db),
     who: Principal = Depends(require(role="lawyer", scope="export")),
 ):
-    """Файл для загрузки в 1С: итоговые значения полей по делам (ключ — УИД, запасной — код суда + номер)."""
+    """Файл для загрузки во внешнюю систему (1С и др.): итоговые значения полей по делам (ключ — УИД, запасной — код суда + номер)."""
     rows = list(_rows(db, status.split(","), since, [f for f in fields.split(",") if f]))
     stamp = datetime.now().strftime("%Y%m%d_%H%M")
     log(db, who, "export", "case_value", None, format=format, status=status, rows=len(rows))
