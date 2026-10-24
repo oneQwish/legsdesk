@@ -852,7 +852,8 @@ class SinkWriter:
 # =============================================================================================
 
 ALLOWED = {
-    "connector": {"name", "api_url", "api_key_env", "api_key_file", "direction", "cafile", "log_dir", "limit"},
+    "connector": {"name", "api_url", "api_key_env", "api_key_file", "direction", "cafile", "log_dir", "limit",
+                  "timeout", "batch", "retry_delays"},
     "source": {"type", "path", "encoding", "delimiter", "sheet", "skip_rows", "date_columns", "items_path", "pattern",
                "recursive", "url", "user", "password", "password_env", "headers", "params", "timeout", "page_size",
                "next_path", "offset_param", "limit_param", "entity", "select", "filter", "expand", "orderby", "query",
@@ -891,6 +892,12 @@ def load_config(path: Path) -> dict:
         if cfg.get(section, {}).get("password"):
             log.warning("[%s] пароль записан прямо в файле настроек — надёжнее password_env (переменная из секреты.bat)", section)
     con = cfg.get("connector", {})
+    for k in ("timeout", "batch"):
+        if k in con and (not isinstance(con[k], int) or con[k] <= 0):
+            raise ConfigError(f"[connector] {k} — нужно положительное число без кавычек, например {k} = 300")
+    if "retry_delays" in con and not (isinstance(con["retry_delays"], list)
+                                      and all(isinstance(x, (int, float)) and x >= 0 for x in con["retry_delays"])):
+        raise ConfigError("[connector] retry_delays — список пауз в секундах, например retry_delays = [2, 5, 10, 20, 40]")
     if not con.get("name"):
         raise ConfigError("в разделе [connector] укажите name — название подключения (для журнала)")
     direction = con.get("direction", "in")
@@ -935,7 +942,7 @@ def client(cfg: dict, base: Path) -> Lawdesk:
     host = urllib.parse.urlparse(url).hostname or ""
     if url.startswith("http://") and host not in ("127.0.0.1", "localhost"):
         log.warning("адрес рабочего места %s без HTTPS — API-ключ передаётся открытым текстом; используйте https://", url)
-    return Lawdesk(url, key, cafile=con.get("cafile"))
+    return Lawdesk(url, key, cafile=con.get("cafile"), timeout=con.get("timeout", 180), batch=con.get("batch", 500))
 
 
 def check_templates(cfg: dict, base: Path) -> None:
@@ -1044,6 +1051,11 @@ def main(argv: list[str]) -> int:
         cfg = load_config(path)
         setup_logging(cfg, base)
         con = cfg["connector"]
+        if "retry_delays" in con:  # паузы между повторами при сбоях связи — для этого подключения
+            global RETRY_DELAYS
+            RETRY_DELAYS = tuple(con["retry_delays"])
+            import lawdesk_client
+            lawdesk_client.RETRY_DELAYS = RETRY_DELAYS
         limit = limit or con.get("limit")
         log.info("=== %s · %s · %s · lawdesk_connect %s ===", con["name"],
                  "проверка" if cmd == "check" else "запуск", dt.datetime.now().strftime("%d.%m.%Y %H:%M"), VERSION)

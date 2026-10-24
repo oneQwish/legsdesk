@@ -7,6 +7,7 @@ from sqlalchemy import cast, func, select, Date
 from sqlalchemy.orm import Session
 
 from .. import clock, deadlines as dl
+from ..config import get_settings
 from ..db import get_db
 from ..filters import CaseFilter
 from ..models import Case, Deadline, Event, User
@@ -17,7 +18,7 @@ router = APIRouter(prefix="/api/v1/desk", tags=["Стол"])
 
 @router.get("/strip")
 def day_strip(
-    days: int = Query(14, ge=1, le=62),
+    days: int = Query(get_settings().desk_strip_days, ge=1, le=get_settings().desk_strip_max_days),
     f: CaseFilter = Depends(CaseFilter.dep),
     db: Session = Depends(get_db),
     _: Principal = Depends(require(role="viewer", scope="read")),

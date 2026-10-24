@@ -1,12 +1,11 @@
 import { useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { Topbar, useSession } from "../App";
-import { api, daysLeft, DEADLINE_KIND, fmtDate, qs, type Deadline } from "../api";
+import { api, daysLeft, DEADLINE_KIND, fmtDate, qs, settings, type Deadline } from "../api";
 import { ActiveChips, FilterButton, filterParams } from "../components/FilterPanel";
 import { DueBadge, ErrorBox, useAction, useLoad } from "../components/ui";
 
 const KIND_LABEL: Record<string, string> = Object.fromEntries(Object.entries(DEADLINE_KIND).map(([k, v]) => [k, v.label]));
-const GROUP_LIMIT = 150; // строк в группе до «показать все» — длинная таблица тормозит прокрутку
 
 export default function DeadlinesPage() {
   const { can, refreshStats } = useSession();
@@ -24,7 +23,8 @@ export default function DeadlinesPage() {
   const [all, setAll] = useState<Record<string, boolean>>({});
   const { run, busy } = useAction();
   const fp = filterParams(sp);
-  fp.set("limit", "2000");
+  fp.set("limit", String(settings.deadlines_page_limit));
+  const GROUP_LIMIT = settings.deadlines_group_limit; // строк в группе до «показать все» — длинная таблица тормозит
   if (status) fp.set("status", status);
   if (kind) fp.set("kind", kind);
   const list = useLoad(() => api<Deadline[]>(`/deadlines${qs(fp)}`), [fp.toString()]);
@@ -37,7 +37,7 @@ export default function DeadlinesPage() {
   ];
   for (const d of list.data ?? []) {
     const n = daysLeft(d.due_date);
-    groups[status !== "open" ? 3 : n < 0 ? 0 : n <= 7 ? 1 : n <= 30 ? 2 : 3][1].push(d);
+    groups[status !== "open" ? 3 : n < 0 ? 0 : n <= settings.soon_days ? 1 : n <= 30 ? 2 : 3][1].push(d);
   }
 
   const done = (d: Deadline) => run(async () => {

@@ -385,3 +385,16 @@ uid = "{uid}"
 """, "c.toml")
     assert lc.main(["x", "проверить", str(tmp_path / "c.toml")]) == lc.EXIT_UNEXPECTED
     assert lc.main(["x", "проверить", str(tmp_path / "c.toml"), "--limit"]) == lc.EXIT_CONFIG
+
+
+def test_connector_timeout_batch_retry_settings(tmp_path, monkeypatch):
+    base = '[connector]\nname = "т"\ndirection = "out"\n[sink]\ntype = "csv"\npath = "o.csv"\n'
+    cfg = lc.load_config(write(tmp_path, base.replace('direction', 'timeout = 300\nbatch = 50\nretry_delays = [1, 2]\ndirection')))
+    monkeypatch.setenv("LAWDESK_KEY", "ldk_x_y")
+    monkeypatch.delenv("LAWDESK_URL", raising=False)
+    ld = lc.client({**cfg, "connector": {**cfg["connector"], "api_url": "http://127.0.0.1:1"}}, tmp_path)
+    assert ld.batch == 50 and ld.timeout == 300
+    with pytest.raises(lc.ConfigError, match="положительное число"):
+        lc.load_config(write(tmp_path, base.replace('direction', 'timeout = "300"\ndirection'), "b.toml"))
+    with pytest.raises(lc.ConfigError, match="retry_delays"):
+        lc.load_config(write(tmp_path, base.replace('direction', 'retry_delays = 5\ndirection'), "c.toml"))

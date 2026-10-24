@@ -8,12 +8,11 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from . import deadlines
+from .config import get_settings
 from .fields import field_def, normalize, parse_money
 from .models import Case, CaseAlias, CaseValue, Document, Event, Observation
 from .security import Principal
 
-# Чем левее, тем надёжнее источник: его значение показывается как текущее при согласии источников
-SOURCE_TRUST = ["ручной", "письмо", "1С", "отчёт", "OCR"]
 
 # Поля дела, которые дублируются в колонки карточки (для реестра и фильтров)
 CASE_COLUMNS = {"plaintiffs", "complex", "building", "flat", "contract_no", "outcome", "subject"}
@@ -152,7 +151,9 @@ def merge_cases(db: Session, who: Principal, target: Case, source: Case) -> None
 # --- Поля и наблюдения ------------------------------------------------------------------------
 
 def _trust(source: str) -> int:
-    return SOURCE_TRUST.index(source) if source in SOURCE_TRUST else len(SOURCE_TRUST)
+    """Чем левее источник в [values] source_trust, тем он надёжнее: его значение показывается при согласии."""
+    order = get_settings().source_trust
+    return order.index(source) if source in order else len(order)
 
 
 def recompute(db: Session, cv: CaseValue, case: Case | None = None) -> str:

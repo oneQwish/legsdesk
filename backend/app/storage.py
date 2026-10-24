@@ -61,19 +61,19 @@ class DocflowStore:
 
     backend = "docflow"
 
-    def __init__(self, url: str, user: str, password: str):
+    def __init__(self, url: str, user: str, password: str, timeout: int = 120):
         if not url:
-            raise StorageUnavailable("1С:Документооборот не настроен (LAWDESK_DOCFLOW_URL)")
-        self.url, self.auth = url.rstrip("/"), (user, password)
+            raise StorageUnavailable("1С:Документооборот не настроен ([storage] docflow_url)")
+        self.url, self.auth, self.timeout = url.rstrip("/"), (user, password), timeout
 
     def put(self, sha256: str, data: bytes, filename: str, meta: dict) -> str:
-        r = httpx.post(f"{self.url}/files", auth=self.auth, timeout=120,
+        r = httpx.post(f"{self.url}/files", auth=self.auth, timeout=self.timeout,
                        files={"file": (filename, data)}, data={"meta": json.dumps({**meta, "sha256": sha256}, ensure_ascii=False)})
         r.raise_for_status()
         return r.json()["id"]
 
     def open(self, ref: str) -> bytes:
-        r = httpx.get(f"{self.url}/files/{ref}", auth=self.auth, timeout=120)
+        r = httpx.get(f"{self.url}/files/{ref}", auth=self.auth, timeout=self.timeout)
         if r.status_code == 404:
             raise StorageUnavailable("Файл не найден в 1С:Документооборот")
         r.raise_for_status()
@@ -86,7 +86,7 @@ def get_store(backend: str | None = None) -> DocumentStore:
     if backend == "local":
         return LocalStore(s.storage_dir)
     if backend == "docflow":
-        return DocflowStore(s.docflow_url, s.docflow_user, s.docflow_password)
+        return DocflowStore(s.docflow_url, s.docflow_user, s.docflow_password, s.docflow_timeout)
     raise StorageUnavailable(f"Хранилище «{backend}» недоступно из приложения")
 
 

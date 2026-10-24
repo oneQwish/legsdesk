@@ -25,9 +25,12 @@ from datetime import date, timedelta
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from .config import get_settings
 from .models import CalendarDay, Case, Deadline, Document
 
-TK_HOLIDAYS = {(1, 1), (1, 2), (1, 3), (1, 4), (1, 5), (1, 6), (1, 7), (1, 8), (2, 23), (3, 8), (5, 1), (5, 9), (6, 12), (11, 4)}
+def fallback_holidays() -> set[tuple[int, int]]:
+    """Праздники запасного календаря ([deadlines] fallback_holidays, «ММ-ДД»), по ст. 112 ТК."""
+    return {(int(m), int(d)) for m, d in (x.split("-") for x in get_settings().fallback_holidays)}
 
 
 def fmt(d: date) -> str:
@@ -41,6 +44,7 @@ class WorkCalendar:
         self.days = days or {}
         self.loaded_years = {d.year for d in self.days}
         self.used_fallback = False
+        self.holidays = fallback_holidays()
 
     @classmethod
     def from_db(cls, db: Session, years: set[int] | None = None) -> "WorkCalendar":
@@ -52,7 +56,7 @@ class WorkCalendar:
         if d.year in self.loaded_years:
             return self.days.get(d, d.weekday() < 5)
         self.used_fallback = True
-        return d.weekday() < 5 and (d.month, d.day) not in TK_HOLIDAYS
+        return d.weekday() < 5 and (d.month, d.day) not in self.holidays
 
     def next_working(self, d: date) -> date:
         while not self.is_working(d):

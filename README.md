@@ -49,7 +49,8 @@
 ## Запуск на сервере (Docker)
 
 ```bash
-cp .env.example .env            # заполнить: пароль БД, LAWDESK_SECRET_KEY, параметры AD и групп
+cp .env.example .env            # секреты: пароль БД, LAWDESK_SECRET_KEY
+nano backend/settings.toml      # настройки: AD и группы, хранилище, часовой пояс… (с пояснениями)
 cp /path/lawdesk.crt /path/lawdesk.key certs/
 docker compose up -d --build
 # первый сервис (например, синхронизация sot.db) — ключ печатается один раз:
@@ -69,7 +70,8 @@ cd frontend && npm install && npm run dev                                       
 ../.venv/bin/python -m pytest -q                                                       # тесты (backend/)
 ```
 
-В `dev`-режиме вход — любой логин, пароль `dev`, роль из `LAWDESK_DEV_ROLE` (по умолчанию admin). Не включайте его на сервере.
+В `dev`-режиме вход — любой логин, пароль `dev`, роль из `[auth] dev_role` / `dev_roles` (по умолчанию admin). Не включайте его на сервере.
+Все настройки — `backend/settings.toml`; проверка и итоговые значения: `python -m app.cli настройки` (из `backend/`).
 
 Демо-данные (вымышленные, без персональных данных): `LAWDESK_KEY=<ключ> python connectors/demo_seed.py`.
 

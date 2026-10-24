@@ -1,5 +1,5 @@
 import { useNavigate } from "react-router-dom";
-import { DEADLINE_KIND, api } from "../api";
+import { DEADLINE_KIND, api, settings } from "../api";
 import { useLoad } from "./ui";
 
 type Day = { date: string; working: boolean; total: number; kinds: Record<string, number> };
@@ -26,7 +26,7 @@ function title(kinds: Record<string, number>): string {
 }
 
 /** Лента дней на две недели: сколько сроков истекает в каждый день. Клик — сроки этого дня. */
-export default function DayStrip({ days = 14 }: { days?: number }) {
+export default function DayStrip({ days = settings.desk_strip_days }: { days?: number }) {
   const nav = useNavigate();
   const r = useLoad(() => api<Strip>(`/desk/strip?days=${days}`), [days]);
   const s = r.data;

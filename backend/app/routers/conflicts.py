@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
+from ..config import get_settings
 from ..db import get_db
 from ..filters import CaseFilter
 from ..logic import reopen_value, resolve_value
@@ -19,7 +20,7 @@ def list_conflicts(
     f: CaseFilter = Depends(CaseFilter.dep),
     status: str = Query("conflict,appeal_possible"),
     page: int = Query(1, ge=1),
-    size: int = Query(20, ge=1, le=200),
+    size: int = Query(20, ge=1, le=get_settings().conflicts_page_max),
     db: Session = Depends(get_db),
     _: Principal = Depends(require(role="viewer", scope="read")),
 ):

@@ -5,6 +5,7 @@ from sqlalchemy import case as sa_case, func, select
 from sqlalchemy.orm import Session, selectinload
 
 from .. import clock, deadlines as dl
+from ..config import get_settings
 from ..db import get_db
 from ..fields import FIELDS, field_def
 from ..filters import CaseFilter, facet_counts, flags, money
@@ -65,7 +66,7 @@ def list_cases(
     f: CaseFilter = Depends(CaseFilter.dep),
     sort: str = Query("-updated_at", pattern="^-?(updated_at|case_number|conflicts|next_due|id)$"),
     page: int = Query(1, ge=1),
-    size: int = Query(50, ge=1, le=500),
+    size: int = Query(50, ge=1, le=get_settings().page_size_max),
     db: Session = Depends(get_db),
     _: Principal = Depends(require(role="viewer", scope="read")),
 ):
@@ -149,7 +150,7 @@ def case_events(case_id: int, db: Session = Depends(get_db), _: Principal = Depe
             Event.action == "case_merged", Event.case_id.in_(frontier))).all()
         frontier = [m for m in merged if m is not None and m not in ids]
         ids.update(frontier)
-    return db.scalars(select(Event).where(Event.case_id.in_(ids)).order_by(Event.id.desc()).limit(500)).all()
+    return db.scalars(select(Event).where(Event.case_id.in_(ids)).order_by(Event.id.desc()).limit(get_settings().case_events_limit)).all()
 
 
 @router.post("/cases/{case_id}/deadlines", response_model=DeadlineOut)
@@ -183,7 +184,7 @@ def stats(db: Session = Depends(get_db), _: Principal = Depends(require(role="vi
     by_status = dict(db.execute(select(CaseValue.status, func.count()).group_by(CaseValue.status)).all())
     dl_counts = db.execute(select(
         func.count(sa_case((Deadline.due_date < today, 1))),
-        func.count(sa_case(((Deadline.due_date >= today) & (Deadline.due_date <= today + timedelta(days=7)), 1))),
+        func.count(sa_case(((Deadline.due_date >= today) & (Deadline.due_date <= today + timedelta(days=get_settings().soon_days)), 1))),
     ).where(Deadline.status == "open")).one()
     return {
         "cases": db.scalar(select(func.count(Case.id))),

@@ -3,7 +3,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY app ./app
-COPY fields.toml ./fields.toml
+COPY fields.toml settings.toml ./
 COPY migrations ./migrations
 RUN useradd -r -u 1000 lawdesk && mkdir -p /data/storage && chown lawdesk /data/storage
 USER lawdesk

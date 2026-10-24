@@ -1,17 +1,18 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useSession } from "../App";
-import { cachedApi } from "../api";
+import { cachedApi, settings } from "../api";
 import { PromptModal } from "./overlay";
 import { useLoad } from "./ui";
 
 type Metric = { this_week: number; last_week: number };
 type ProgressResp = { metrics: Record<string, Metric>; streak: number; overdue_now: number; scope: string };
 
-const METRICS: { key: string; label: string; goal: number; to: string }[] = [
-  { key: "conflicts", label: "Конфликты разобраны", goal: 50, to: "/conflicts" },
-  { key: "deadlines", label: "Сроки закрыты", goal: 20, to: "/deadlines" },
-  { key: "documents", label: "Документы привязаны", goal: 20, to: "/documents?unlinked=1" },
+// цели по умолчанию — из settings.toml ([interface] goal_*); юрист может поменять свои
+const METRICS: { key: string; label: string; readonly goal: number; to: string }[] = [
+  { key: "conflicts", label: "Конфликты разобраны", get goal() { return settings.goal_conflicts; }, to: "/conflicts" },
+  { key: "deadlines", label: "Сроки закрыты", get goal() { return settings.goal_deadlines; }, to: "/deadlines" },
+  { key: "documents", label: "Документы привязаны", get goal() { return settings.goal_documents; }, to: "/documents?unlinked=1" },
 ];
 
 function loadGoals(): Record<string, number> {

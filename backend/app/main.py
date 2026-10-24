@@ -10,9 +10,9 @@ from fastapi.staticfiles import StaticFiles
 
 from . import clock
 from . import deadlines as dl
-from .config import get_settings
+from .config import get_settings, problems
 from .db import SessionLocal, engine, init_db
-from .routers import admin, auth, cases, conflicts, deadlines, documents, export, ingest, tasks, views, desk
+from .routers import admin, auth, cases, conflicts, deadlines, documents, export, ingest, tasks, views, desk, settings
 
 DESCRIPTION = """
 API рабочего места юриста. Люди входят доменной учёткой (cookie-сессия), сервисы системы
@@ -25,8 +25,9 @@ API рабочего места юриста. Люди входят доменн
 def check_settings() -> None:
     """Отказаться стартовать с опасными настройками — понятным сообщением в журнале контейнера."""
     s = get_settings()
-    if s.auth_mode not in ("ldap", "dev"):
-        raise RuntimeError(f"LAWDESK_AUTH_MODE={s.auth_mode}: допустимо ldap или dev")
+    bad = problems(s)
+    if bad:
+        raise RuntimeError("Ошибки в настройках (backend/settings.toml или LAWDESK_…):\n  " + "\n  ".join(bad))
     if s.auth_mode == "dev" and s.cookie_secure:
         raise RuntimeError("LAWDESK_AUTH_MODE=dev (вход без пароля) запрещён на сервере с HTTPS — укажите ldap")
     if s.auth_mode != "dev" and (s.secret_key == "change-me" or len(s.secret_key) < 32):
@@ -52,7 +53,7 @@ async def upkeep_loop():
             await asyncio.to_thread(daily_upkeep)
         except Exception:  # noqa: BLE001 — регламент не должен ронять сервер; повторится через час
             logging.getLogger("lawdesk").exception("регламентное действие не выполнено")
-        await asyncio.sleep(3600)
+        await asyncio.sleep(get_settings().upkeep_interval_minutes * 60)
 
 
 @asynccontextmanager
@@ -67,7 +68,7 @@ async def lifespan(_: FastAPI):
 app = FastAPI(title="Рабочее место юриста", version="0.1.0", description=DESCRIPTION, lifespan=lifespan,
               docs_url="/api/docs", openapi_url="/api/openapi.json", redoc_url=None)
 
-for r in (auth, cases, conflicts, documents, deadlines, ingest, tasks, export, admin, views, desk):
+for r in (auth, cases, conflicts, documents, deadlines, ingest, tasks, export, admin, views, desk, settings):
     app.include_router(r.router)
 
 

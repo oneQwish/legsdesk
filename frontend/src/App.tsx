@@ -1,6 +1,6 @@
 import { createContext, lazy, Suspense, useCallback, useContext, useEffect, useState, type ComponentType, type ReactNode } from "react";
 import { NavLink, Navigate, Route, Routes, useParams } from "react-router-dom";
-import { api, type Me, type Role, type Stats } from "./api";
+import { api, loadClientSettings, type Me, type Role, type Stats } from "./api";
 import { Icon } from "./components/icons";
 import { anyModalOpen, ToastProvider } from "./components/overlay";
 import QuickSearch from "./components/QuickSearch";
@@ -66,7 +66,8 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    api<Me>("/auth/me").then(setMe).catch(() => setMe(null));
+    // настройки интерфейса — до первой отрисовки страниц, чтобы пороги и размеры стопок были сразу верными
+    api<Me>("/auth/me").then(async (m) => { await loadClientSettings(); setMe(m); }).catch(() => setMe(null));
     // сессия истекла посреди работы: вход поверх страницы, а не вместо неё — недописанный комментарий не пропадёт
     const onUnauthorized = () => setExpired(true);
     window.addEventListener("lawdesk:unauthorized", onUnauthorized);
@@ -92,7 +93,7 @@ export default function App() {
   }, []);
 
   if (me === undefined) return null;
-  if (me === null) return <LoginPage onLogin={setMe} />;
+  if (me === null) return <LoginPage onLogin={(m) => void loadClientSettings().then(() => setMe(m))} />;
 
   const can = (role: Role) => ORDER.indexOf(me.role) >= ORDER.indexOf(role);
   const conflicts = (stats?.values_by_status.conflict ?? 0) + (stats?.values_by_status.appeal_possible ?? 0);

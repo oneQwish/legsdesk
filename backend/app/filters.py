@@ -16,6 +16,7 @@ from sqlalchemy.orm import aliased
 from sqlalchemy.sql import ColumnElement
 
 from . import clock
+from .config import get_settings
 from .fields import FIELDS
 from .logic import search_cases_filter
 from .models import Case, CaseValue, Deadline, Document, Observation
@@ -219,8 +220,9 @@ DEADLINE_KIND_LABEL = {
 }
 
 
-def facet_counts(db, f: CaseFilter, limit: int = 200) -> dict[str, list[dict]]:
+def facet_counts(db, f: CaseFilter, limit: int | None = None) -> dict[str, list[dict]]:
     out: dict[str, list[dict]] = {}
+    limit = limit or get_settings().facet_limit
 
     def run(key: str, stmt, label=None):
         rows = db.execute(stmt.where(*f.where(exclude=key)).group_by(stmt.selected_columns[0])

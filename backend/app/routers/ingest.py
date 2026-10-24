@@ -22,12 +22,10 @@ from ..storage import StorageUnavailable, get_store, sha256_bytes
 
 router = APIRouter(prefix="/api/v1/ingest", tags=["Приём данных (сервисы)"])
 
-MAX_BATCH = 1000
-
-
 def _batch(db: Session, items: list, fn):
-    if len(items) > MAX_BATCH:
-        raise HTTPException(413, f"Не больше {MAX_BATCH} элементов за запрос")
+    limit = get_settings().ingest_max_batch
+    if len(items) > limit:
+        raise HTTPException(413, f"Не больше {limit} элементов за запрос")
     results = []
     for i, item in enumerate(items):
         sp = db.begin_nested()

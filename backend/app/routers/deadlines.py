@@ -5,6 +5,7 @@ from sqlalchemy import case as sa_case, delete, extract, func, select
 from sqlalchemy.orm import Session, selectinload
 
 from .. import deadlines as dl
+from ..config import get_settings
 from ..db import get_db
 from ..filters import CaseFilter
 from ..logic import log
@@ -22,7 +23,7 @@ def list_deadlines(
     due_after: date | None = None,
     assignee: str = "",
     kind: str = "",
-    limit: int = Query(500, ge=1, le=5000),
+    limit: int = Query(500, ge=1, le=get_settings().deadlines_limit_max),
     f: CaseFilter = Depends(CaseFilter.dep),
     db: Session = Depends(get_db),
     _: Principal = Depends(require(role="viewer", scope="read")),
@@ -89,8 +90,10 @@ def load_calendar(body: CalendarIn, db: Session = Depends(get_db),
     nonworking = set(body.nonworking)
     if any(d.year != body.year for d in nonworking):
         raise HTTPException(400, "Все даты должны относиться к указанному году")
-    if not 100 <= len(nonworking) <= 140:
-        raise HTTPException(400, f"Нерабочих дней {len(nonworking)} — похоже на неполные данные (ожидается 110–125)")
+    s = get_settings()
+    if not s.calendar_min_nonworking <= len(nonworking) <= s.calendar_max_nonworking:
+        raise HTTPException(400, f"Нерабочих дней {len(nonworking)} — похоже на неполные данные (ожидается "
+                                 f"{s.calendar_min_nonworking}–{s.calendar_max_nonworking}, [deadlines] в settings.toml)")
     db.execute(delete(CalendarDay).where(extract("year", CalendarDay.day) == body.year))
     d = date(body.year, 1, 1)
     while d.year == body.year:

@@ -1,11 +1,11 @@
 import { useNavigate } from "react-router-dom";
-import { daysLeft, fmtDate, shortCourt, type CaseBrief } from "../api";
+import { daysLeft, fmtDate, settings, shortCourt, type CaseBrief } from "../api";
 import AwardBar from "./AwardBar";
 
 export function caseTone(c: CaseBrief): string {
   if (!c.next_due) return "tone-none";
   const n = daysLeft(c.next_due);
-  return n <= 3 ? "tone-hot" : n <= 10 ? "tone-soon" : "tone-calm";
+  return n <= settings.desk_hot_days ? "tone-hot" : n <= settings.desk_week_days ? "tone-soon" : "tone-calm";
 }
 
 function dueText(due: string): string {
@@ -37,7 +37,7 @@ export default function CaseCard({ c, style, className = "" }: { c: CaseBrief; s
           <div className="due">
             <div className="muted ellipsis">{c.next_title ?? "срок"}</div>
             <b>{fmtDate(c.next_due)}</b>{" "}
-            <span className={`badge ${overdue ? "overdue" : daysLeft(c.next_due) <= 7 ? "soon" : "later"}`}>{dueText(c.next_due)}</span>
+            <span className={`badge ${overdue ? "overdue" : daysLeft(c.next_due) <= settings.soon_days ? "soon" : "later"}`}>{dueText(c.next_due)}</span>
           </div>
         ) : (
           <span className="due muted">открытых сроков нет</span>

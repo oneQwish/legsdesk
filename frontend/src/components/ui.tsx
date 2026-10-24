@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { STATUS_LABEL, daysLeft, fmtDate } from "../api";
+import { STATUS_LABEL, daysLeft, fmtDate, settings } from "../api";
 import { useToast } from "./overlay";
 
 /** Загрузка данных страницы. Ответ на устаревший запрос (фильтры успели смениться) отбрасывается,
@@ -83,7 +83,7 @@ export function DueBadge({ due, status }: { due: string; status?: string }) {
   if (status === "done") return <span className="badge done">выполнено</span>;
   if (status === "cancelled") return <span className="badge later">снят</span>;
   const n = daysLeft(due);
-  const cls = n < 0 ? "overdue" : n <= 7 ? "soon" : "later";
+  const cls = n < 0 ? "overdue" : n <= settings.soon_days ? "soon" : "later";
   const text = n < 0 ? `просрочен ${-n} дн.` : n === 0 ? "сегодня" : `через ${n} дн.`;
   return (
     <span className={`badge ${cls}`} title={fmtDate(due)}>

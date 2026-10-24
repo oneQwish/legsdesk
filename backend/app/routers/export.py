@@ -10,6 +10,7 @@ from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session, selectinload
 
 from .. import clock
+from ..config import get_settings
 from ..db import get_db
 from ..fields import field_def
 from ..logic import log
@@ -27,15 +28,15 @@ def sequence_feed(db: Session) -> None:
     db.execute(text("SELECT pg_advisory_xact_lock(:k)"), {"k": FEED_LOCK})
     db.execute(text("""
         UPDATE events SET feed_seq = nextval('events_feed_seq')
-        WHERE id IN (SELECT id FROM events WHERE feed_seq IS NULL ORDER BY id LIMIT 50000)
-    """))
+        WHERE id IN (SELECT id FROM events WHERE feed_seq IS NULL ORDER BY id LIMIT :n)
+    """), {"n": get_settings().feed_sequence_batch})
     db.commit()
 
 
 @router.get("/changes", response_model=ChangesOut)
 def changes(
     after: int = Query(0, ge=0, description="Курсор: next_cursor из прошлого ответа"),
-    limit: int = Query(500, ge=1, le=5000),
+    limit: int = Query(500, ge=1, le=get_settings().feed_limit_max),
     actions: str = Query("", description="Через запятую, напр. value_resolved,case_merged"),
     db: Session = Depends(get_db),
     _: Principal = Depends(require(role="viewer", scope="export")),
@@ -59,7 +60,7 @@ def journal(
     action: str = "",
     case_id: int | None = None,
     page: int = Query(1, ge=1),
-    size: int = Query(100, ge=1, le=1000),
+    size: int = Query(100, ge=1, le=get_settings().journal_page_max),
     db: Session = Depends(get_db),
     _: Principal = Depends(require(role="viewer")),
 ):

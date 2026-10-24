@@ -39,6 +39,31 @@ export async function api<T>(path: string, init: RequestInit & { json?: unknown 
   return body as T;
 }
 
+/** Настройки интерфейса из backend/settings.toml, раздел [interface] (GET /settings/client).
+ *  Здесь — те же умолчания, что на сервере: интерфейс работает, даже если настройки не загрузились. */
+export const settings = {
+  desk_strip_days: 14,
+  desk_strip_max_days: 62,
+  desk_hot_days: 3,
+  desk_week_days: 10,
+  desk_pile_size: 60,
+  deadlines_page_limit: 2000,
+  deadlines_group_limit: 150,
+  goal_conflicts: 50,
+  goal_deadlines: 20,
+  goal_documents: 20,
+  soon_days: 7,
+  timezone: "Europe/Moscow",
+};
+
+export async function loadClientSettings(): Promise<void> {
+  try {
+    Object.assign(settings, await api<Partial<typeof settings>>("/settings/client"));
+  } catch {
+    /* остаются умолчания */
+  }
+}
+
 const inflight = new Map<string, { at: number; p: Promise<unknown> }>();
 
 /** GET с коротким кэшем: одинаковые запросы из разных частей страницы (фасеты, подборки) идут один раз. */

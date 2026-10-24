@@ -56,10 +56,12 @@ class AuthError(Exception):
 
 
 class LoginThrottle:
-    """Защита от перебора паролей: после N неудач подряд для пары (логин, адрес) вход закрыт на 15 минут.
+    """Защита от перебора паролей: после N неудач подряд для пары (логин, адрес) вход закрыт на M минут.
     Заодно бережёт учётные записи AD от блокировки чужими попытками. Хранится в памяти процесса."""
 
-    WINDOW = timedelta(minutes=15)
+    @property
+    def WINDOW(self) -> timedelta:  # noqa: N802
+        return timedelta(minutes=get_settings().login_lockout_minutes)
 
     def __init__(self):
         self._fails: dict[tuple[str, str], list[datetime]] = {}
@@ -106,12 +108,12 @@ def ldap_authenticate(login: str, password: str) -> tuple[str, str, str]:
     if not password:
         raise AuthError("Пустой пароль")
     sam = login.split("\\")[-1].split("@")[0]
-    server = ldap3.Server(s.ldap_url, get_info=ldap3.NONE, connect_timeout=5)
+    server = ldap3.Server(s.ldap_url, get_info=ldap3.NONE, connect_timeout=s.ldap_connect_timeout)
     exc = ldap3.core.exceptions
     try:
         conn = ldap3.Connection(server, user=f"{s.ldap_domain}\\{sam}", password=password,
                                 authentication=ldap3.NTLM if s.ldap_url.startswith("ldap://") else ldap3.SIMPLE,
-                                auto_bind=True, raise_exceptions=True, receive_timeout=10)
+                                auto_bind=True, raise_exceptions=True, receive_timeout=s.ldap_receive_timeout)
     except (exc.LDAPSocketOpenError, exc.LDAPSocketReceiveError, exc.LDAPSessionTerminatedByServerError) as e:
         # не путать с неверным паролем: иначе при недоступном контроллере «не пускает всех» без объяснения
         raise AuthError("Контроллер домена недоступен — сообщите администратору", unavailable=True) from e

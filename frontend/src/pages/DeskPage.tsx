@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { Link } from "react-router-dom";
 import { Topbar, useSession } from "../App";
-import { api, cachedApi, invalidateCache, localISO, qs, type CaseBrief, type Page } from "../api";
+import { api, cachedApi, invalidateCache, localISO, qs, settings, type CaseBrief, type Page } from "../api";
 import { VIEW_COLORS, type SavedView } from "../components/FilterPanel";
 import Pile from "../components/Pile";
 import DayStrip from "../components/DayStrip";
@@ -15,7 +15,7 @@ const plus = (days: number) => {
 };
 
 function usePile(params: Record<string, string | number | boolean | undefined>, filter?: (c: CaseBrief) => boolean) {
-  const r = useLoad(() => api<Page<CaseBrief>>(`/cases${qs({ size: 60, ...params })}`), [JSON.stringify(params)]);
+  const r = useLoad(() => api<Page<CaseBrief>>(`/cases${qs({ size: settings.desk_pile_size, ...params })}`), [JSON.stringify(params)]);
   // один и тот же массив, пока не пришли новые данные, — иначе стопка сбрасывала бы позицию на каждую перерисовку
   const items = useMemo(() => (r.data?.items ?? []).filter(filter ?? (() => true)), [r.data]); // eslint-disable-line react-hooks/exhaustive-deps
   return { items, total: filter ? items.length : r.data?.total ?? 0, loading: r.loading };
@@ -23,8 +23,9 @@ function usePile(params: Record<string, string | number | boolean | undefined>, 
 
 export default function DeskPage() {
   const { me, stats } = useSession();
-  const hot = usePile({ due_before: plus(3), sort: "next_due" });
-  const week = usePile({ due_before: plus(10), sort: "next_due" }, (c) => !!c.next_due && c.next_due > plus(3));
+  const hot = usePile({ due_before: plus(settings.desk_hot_days), sort: "next_due" });
+  const week = usePile({ due_before: plus(settings.desk_week_days), sort: "next_due" },
+                       (c) => !!c.next_due && c.next_due > plus(settings.desk_hot_days));
   const conflicts = usePile({ has_conflicts: true, sort: "-conflicts" });
   const mine = usePile({ responsible: me.login, sort: "next_due" });
   const noUid = usePile({ has_uid: false, sort: "-updated_at" });
@@ -70,7 +71,7 @@ export default function DeskPage() {
 
 /** Стопка из сохранённой подборки фильтров. */
 function ViewPile({ view, onRemove }: { view: SavedView; onRemove: () => void }) {
-  const r = useLoad(() => api<Page<CaseBrief>>(`/cases?${view.params}${view.params ? "&" : ""}size=60&sort=next_due`), [view.params]);
+  const r = useLoad(() => api<Page<CaseBrief>>(`/cases?${view.params}${view.params ? "&" : ""}size=${settings.desk_pile_size}&sort=next_due`), [view.params]);
   return (
     <div className="view-pile">
       <Pile title={view.name} color={VIEW_COLORS[view.color] ?? "var(--ink)"} items={r.data?.items ?? []}

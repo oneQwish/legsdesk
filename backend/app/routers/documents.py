@@ -5,6 +5,7 @@ from fastapi.responses import Response, StreamingResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from ..config import get_settings
 from ..db import get_db
 from ..logic import link_document, log
 from ..models import Case, Document, Observation
@@ -15,10 +16,6 @@ from ..logic import require_case
 
 router = APIRouter(prefix="/api/v1/documents", tags=["Документы"])
 
-# Что браузер может показать прямо на странице. Остальное (в том числе HTML и SVG, присланные сервисом
-# или пользователем) отдаётся только на скачивание: иначе файл со скриптом выполнился бы от имени юриста.
-INLINE_MIME = {"application/pdf", "image/png", "image/jpeg", "image/gif", "image/webp", "image/tiff",
-               "text/plain"}
 
 
 @router.get("", response_model=Page[DocumentBrief])
@@ -28,7 +25,7 @@ def list_documents(
     act_type: str = "",
     unlinked: bool | None = None,
     page: int = Query(1, ge=1),
-    size: int = Query(50, ge=1, le=500),
+    size: int = Query(50, ge=1, le=get_settings().page_size_max),
     db: Session = Depends(get_db),
     _: Principal = Depends(require(role="viewer", scope="read")),
 ):
@@ -85,7 +82,9 @@ def get_file(doc_id: int, signature: bool = False, db: Session = Depends(get_db)
     else:
         mime = d.mime
     mime = (mime or "application/octet-stream").split(";")[0].strip().lower()
-    inline = mime in INLINE_MIME
+    # что браузер может показать на странице ([storage] inline_mime); остальное (HTML, SVG…) — только скачать,
+    # иначе файл со скриптом выполнился бы от имени юриста
+    inline = mime in get_settings().inline_mime and mime not in ("text/html", "image/svg+xml")
     headers = {"Content-Disposition": f"{'inline' if inline else 'attachment'}; filename*=UTF-8''{quote(name)}",
                "Cache-Control": "private, max-age=3600", "X-Content-Type-Options": "nosniff"}
     if mime != "application/pdf":  # встроенный просмотрщик PDF в Chrome не работает в песочнице

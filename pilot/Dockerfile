@@ -12,7 +12,7 @@ WORKDIR /srv/backend
 COPY backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY backend/app ./app
-COPY backend/fields.toml ./fields.toml
+COPY backend/fields.toml backend/settings.toml ./
 COPY backend/migrations ./migrations
 COPY connectors /srv/connectors
 COPY --from=web /src/dist /srv/frontend/dist
