@@ -217,6 +217,7 @@ SIMPLE_FACETS = {
 DEADLINE_KIND_LABEL = {
     "appeal": "апелляционная жалоба", "effective": "вступление в силу", "cassation": "кассационная жалоба",
     "private_complaint": "частная жалоба", "default_cancel": "отмена заочного", "hearing": "заседание", "custom": "свой срок",
+    "voluntary": "добровольное исполнение", "writ": "предъявление листа",
 }
 
 

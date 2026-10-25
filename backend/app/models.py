@@ -387,3 +387,41 @@ class Hearing(Base):
     removed: Mapped[bool] = mapped_column(Boolean, default=False)  # исчезла из источника
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     __table_args__ = (UniqueConstraint("source", "ext_uid", name="uq_hearing_source_uid"),)
+
+
+class Enforcement(Base):
+    """Исполнительный лист и исполнительное производство по делу (Закон № 229-ФЗ)."""
+
+    __tablename__ = "enforcements"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    case_id: Mapped[int] = mapped_column(ForeignKey("cases.id", ondelete="CASCADE"), index=True)
+    side: Mapped[str] = mapped_column(String(16), default="debtor")  # debtor — взыскивают с нас; creditor — мы взыскиваем
+    writ_number: Mapped[str] = mapped_column(String(64), default="")  # серия и номер исполнительного листа
+    writ_date: Mapped[date | None] = mapped_column(Date)  # дата выдачи листа
+    effective_date: Mapped[date | None] = mapped_column(Date)  # вступление решения в силу
+    presentation_until: Mapped[date | None] = mapped_column(Date)  # срок предъявления (ст. 21 229-ФЗ)
+    ip_number: Mapped[str] = mapped_column(String(64), default="", index=True)  # номер ИП, напр. 12345/26/50001-ИП
+    fssp_department: Mapped[str] = mapped_column(String(256), default="")
+    bailiff: Mapped[str] = mapped_column(String(256), default="")
+    start_date: Mapped[date | None] = mapped_column(Date)  # возбуждено
+    received_date: Mapped[date | None] = mapped_column(Date)  # получено постановление о возбуждении (для добровольного срока)
+    status: Mapped[str] = mapped_column(String(32), default="лист получен")
+    amount: Mapped[Decimal | None] = mapped_column(Numeric(18, 2))  # сумма по листу
+    recovered: Mapped[Decimal | None] = mapped_column(Numeric(18, 2))  # взыскано / уплачено
+    end_date: Mapped[date | None] = mapped_column(Date)
+    notes: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class Report(Base):
+    """Сформированный отчёт (еженедельный по расписанию или по кнопке): файл лежит в [documents] reports_dir."""
+
+    __tablename__ = "reports"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    kind: Mapped[str] = mapped_column(String(32))  # weekly | manual
+    title: Mapped[str] = mapped_column(String(256))
+    file: Mapped[str] = mapped_column(String(256))
+    period_key: Mapped[str] = mapped_column(String(32), default="", index=True)  # для weekly: 2026-W43 — один раз в неделю
+    created_by: Mapped[str] = mapped_column(String(128), default="system")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

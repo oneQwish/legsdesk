@@ -339,6 +339,8 @@ export const DEADLINE_KIND: Record<string, { label: string; color: string }> = {
   default_cancel: { label: "отмена заочного", color: "var(--ochre)" },
   hearing: { label: "заседание", color: "var(--link)" },
   custom: { label: "свой срок", color: "var(--ink-2)" },
+  voluntary: { label: "добровольное исполнение", color: "var(--seal)" },
+  writ: { label: "предъявление листа", color: "var(--violet)" },
 };
 
 export function daysLeft(due: string): number {

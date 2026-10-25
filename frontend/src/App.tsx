@@ -6,6 +6,7 @@ import { anyModalOpen, ToastProvider } from "./components/overlay";
 import QuickSearch from "./components/QuickSearch";
 import { Bell } from "./components/Work";
 import { AssignmentsPage, HearingsPage } from "./pages/WorkPages";
+import { AnalyticsPage, EnforcementPage } from "./pages/StagePages";
 import CasePage from "./pages/CasePage";
 import CasesPage from "./pages/CasesPage";
 import ConflictsPage from "./pages/ConflictsPage";
@@ -127,6 +128,8 @@ export default function App() {
             {item("/assignments", "assign", "Поручения")}
             {item("/hearings", "hearing", "Заседания")}
             {item("/documents", "documents", "Документы")}
+            {item("/enforcement", "money", "Исполнение")}
+            {item("/analytics", "chart", "Аналитика")}
             {item("/journal", "journal", "Журнал")}
             {can("admin") && item("/admin", "services", "Сервисы и API")}
             <div className="rail-bottom">
@@ -149,6 +152,8 @@ export default function App() {
               <Route path="/journal" element={<JournalPage />} />
               <Route path="/assignments" element={<AssignmentsPage />} />
               <Route path="/hearings" element={<HearingsPage />} />
+              <Route path="/enforcement" element={<EnforcementPage />} />
+              <Route path="/analytics" element={<AnalyticsPage />} />
               <Route path="/admin" element={can("admin") ? <Suspense fallback={null}><AdminPage /></Suspense> : <Navigate to="/" />} />
               <Route path="*" element={<Navigate to="/" />} />
             </Routes>

@@ -588,3 +588,7 @@ tr.hl td:first-child { box-shadow: inset 3px 0 var(--seal); }
 
 .snippet { margin-top: 6px; font-size: 13px; line-height: 1.5; color: var(--ink-2); }
 .snippet mark { background: color-mix(in srgb, var(--ochre) 35%, transparent); color: inherit; padding: 0 1px; border-radius: 2px; }
+
+.mini-bar { display: inline-block; width: 80px; height: 6px; border-radius: 3px; background: var(--panel-2); vertical-align: middle; margin-right: 6px; overflow: hidden; }
+.mini-bar > span { display: block; height: 100%; border-radius: 3px; }
+tfoot th { border-top: 1px solid var(--line); }
