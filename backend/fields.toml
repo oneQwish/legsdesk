@@ -78,6 +78,16 @@ label = "Номер договора"
 kind = "text"
 group = "Объект"
 
+[field.contract_price]
+label = "Цена договора"
+kind = "money"
+group = "Объект"
+
+[field.transfer_due]
+label = "Срок передачи по договору"
+kind = "date"
+group = "Объект"
+
 [field.claim_total]
 label = "Заявлено всего"
 kind = "money"

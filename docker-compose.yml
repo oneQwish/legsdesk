@@ -28,6 +28,7 @@ services:
       - ./backend/fields.toml:/app/fields.toml:ro       # справочник полей: правка + docker compose restart backend
       - ./backend/settings.toml:/app/settings.toml:ro   # настройки: правка + docker compose restart backend
       - ./backend/forms:/app/forms                      # шаблоны печатных форм (загружаются из интерфейса)
+      - ./backend/penalty.toml:/app/penalty.toml:ro     # ставки ЦБ и моратории для калькулятора неустойки
     healthcheck:   # /api/health отвечает 503, если недоступна база
       test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8000/api/health',timeout=5)"]
       interval: 30s

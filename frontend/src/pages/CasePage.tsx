@@ -7,14 +7,15 @@ import CasePath from "../components/CasePath";
 import CaseForm from "../components/CaseForm";
 import { FormsModal } from "../components/Forms";
 import { EnforcementTab } from "./StagePages";
+import PenaltyTab from "../components/Penalty";
 import { AssignmentList, AssignmentModal, Discussion, HearingList, PinnedNotes } from "../components/Work";
 import Chronology from "../components/Chronology";
 import ResolvePanel, { ObservationLine } from "../components/ResolvePanel";
 import { PromptModal, useToast } from "../components/overlay";
 import { DueBadge, ErrorBox, StatusBadge, clickable, useAction, useLoad } from "../components/ui";
 
-type Tab = "values" | "chronology" | "documents" | "deadlines" | "journal" | "discussion" | "work" | "enforcement";
-const TABS: Tab[] = ["values", "chronology", "documents", "deadlines", "journal", "discussion", "work", "enforcement"];
+type Tab = "values" | "chronology" | "documents" | "deadlines" | "journal" | "discussion" | "work" | "enforcement" | "penalty";
+const TABS: Tab[] = ["values", "chronology", "documents", "deadlines", "journal", "discussion", "work", "enforcement", "penalty"];
 
 export default function CasePage() {
   const { id } = useParams();
@@ -95,6 +96,7 @@ export default function CasePage() {
         <button className={tab === "chronology" ? "on" : ""} onClick={() => setTab("chronology")}>Хронология</button>
         <button className={tab === "discussion" ? "on" : ""} onClick={() => setTab("discussion")}>Обсуждение</button>
         <button className={tab === "work" ? "on" : ""} onClick={() => setTab("work")}>Поручения и заседания</button>
+        <button className={tab === "penalty" ? "on" : ""} onClick={() => setTab("penalty")}>Неустойка</button>
         <button className={tab === "enforcement" ? "on" : ""} onClick={() => setTab("enforcement")}>Исполнение</button>
         <button className={tab === "journal" ? "on" : ""} onClick={() => setTab("journal")}>Журнал</button>
       </div>
@@ -124,6 +126,7 @@ export default function CasePage() {
       {tab === "chronology" && <Chronology c={data} />}
       {tab === "journal" && <JournalTab caseId={data.id} />}
       {tab === "discussion" && <Discussion caseId={data.id} />}
+      {tab === "penalty" && <PenaltyTab caseId={data.id} />}
       {tab === "enforcement" && <EnforcementTab caseId={data.id} onChanged={c.reload} />}
       {tab === "work" && <WorkTab caseId={data.id} onGive={() => setGiving(true)} />}
       {forming && <FormsModal caseId={data.id} onClose={() => setForming(false)} />}
