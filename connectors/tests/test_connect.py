@@ -111,7 +111,7 @@ def test_xlsx_json_folder_calendar_examples():
     xr = list(lc.read_rows(lc.load_config(EXAMPLES / "xlsx.toml")["source"], EXAMPLES))
     assert xr[0]["Дата решения"] == "2027-03-15"
     doc = lc.map_row(lc.load_config(EXAMPLES / "папка_документов.toml"),
-                     next(lc.read_rows({"type": "folder", "path": "данные/документы", "pattern": "*.pdf"}, EXAMPLES)))["document"]
+                     next(lc.read_rows({"type": "folder", "path": "данные/документы", "pattern": "*.pdf", "min_age_minutes": 0}, EXAMPLES)))["document"]
     assert doc["act_type"] == "решение" and doc["case"] == {"uid": "50RS0010-01-2027-000101-11"} and doc["_file"].endswith(".pdf")
 
 
