@@ -12,7 +12,8 @@ from . import clock
 from . import deadlines as dl
 from .config import get_settings, problems
 from .db import SessionLocal, engine, init_db
-from .routers import admin, auth, cases, conflicts, deadlines, documents, export, ingest, tasks, views, desk, settings
+from .routers import (admin, auth, cases, conflicts, deadlines, desk, directories, documents, export, hearings, ingest,
+                      settings, tasks, views, work)
 
 DESCRIPTION = """
 API рабочего места юриста. Люди входят доменной учёткой (cookie-сессия), сервисы системы
@@ -40,9 +41,15 @@ def check_settings() -> None:
 
 
 def daily_upkeep() -> int:
-    """Регламентные действия «по дате»: закрыть прошедшие события (вступление в силу)."""
+    """Регламентные действия «по дате»: закрыть прошедшие события (вступление в силу), напоминания о сроках,
+    поручениях и заседаниях. Повторный запуск в тот же день ничего не дублирует."""
+    from .routers.hearings import remind_hearings
+
+    today = clock.today()
     with SessionLocal() as db:
-        n = dl.close_passed_events(db, clock.today())
+        n = dl.close_passed_events(db, today)
+        n += dl.remind(db, today)
+        n += remind_hearings(db, today)
         db.commit()
         return n
 
@@ -68,7 +75,8 @@ async def lifespan(_: FastAPI):
 app = FastAPI(title="Рабочее место юриста", version="0.1.0", description=DESCRIPTION, lifespan=lifespan,
               docs_url="/api/docs", openapi_url="/api/openapi.json", redoc_url=None)
 
-for r in (auth, cases, conflicts, documents, deadlines, ingest, tasks, export, admin, views, desk, settings):
+for r in (auth, cases, conflicts, documents, deadlines, ingest, tasks, export, admin, views, desk, settings, directories,
+          work, hearings):
     app.include_router(r.router)
 
 

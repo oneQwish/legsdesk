@@ -9,9 +9,10 @@ from ..config import get_settings
 from ..db import get_db
 from ..fields import FIELDS, field_def
 from ..filters import CaseFilter, facet_counts, flags, money
+from .. import logic
 from ..logic import log, merge_cases
-from ..models import Case, CaseValue, Deadline, Document, Event
-from ..schemas import (CaseBrief, CaseOut, CasePatch, DeadlineIn, DeadlineOut, DocumentBrief, EventOut, Page,
+from ..models import Case, CaseAlias, CaseValue, Deadline, Document, Event
+from ..schemas import (CaseBrief, CaseCreate, CaseOut, CasePatch, DeadlineIn, DeadlineOut, DocumentBrief, EventOut, Page,
                        ValueOut)
 from ..security import Principal, require
 
@@ -92,6 +93,17 @@ def facets(f: CaseFilter = Depends(CaseFilter.dep), db: Session = Depends(get_db
             "sum_fields": [{"key": x.key, "label": x.label} for x in FIELDS.values() if x.kind == "money"]}
 
 
+@router.get("/cases/duplicates")
+def duplicates(uid: str = "", case_number: str = "", court_code: str = "", contract_no: str = "",
+               building: str = "", flat: str = "", plaintiffs: str = "", exclude: int | None = None,
+               db: Session = Depends(get_db), _: Principal = Depends(require(role="viewer", scope="read"))):
+    """Похожие дела — проверка перед заведением нового (по УИД, номеру, договору, квартире и истцам)."""
+    q = CaseCreate(uid=uid or None, case_number=case_number or None, court_code=court_code or None,
+                   contract_no=contract_no or None, building=building or None, flat=flat or None,
+                   plaintiffs=plaintiffs or None)
+    return logic.find_duplicates(db, q, exclude_id=exclude)
+
+
 def load_case(db: Session, case_id: int) -> Case:
     c = db.scalar(select(Case).where(Case.id == case_id).options(
         selectinload(Case.aliases), selectinload(Case.values).selectinload(CaseValue.observations),
@@ -120,14 +132,38 @@ def get_case(case_id: int, db: Session = Depends(get_db), _: Principal = Depends
 @router.patch("/cases/{case_id}", response_model=CaseBrief)
 def patch_case(case_id: int, body: CasePatch, db: Session = Depends(get_db),
                who: Principal = Depends(require(role="lawyer"))):
+    """Правка реквизитов дела (любых). Изменения — в журнал и в ленту для внешних систем (case_updated)."""
     c = load_case(db, case_id)
-    changes = {}
-    for k, v in body.model_dump(exclude_none=True).items():
-        if getattr(c, k) != v:
-            changes[k] = [getattr(c, k), v]
-            setattr(c, k, v)
-    if changes:
-        log(db, who, "case_updated", "case", c.id, c.id, changes=changes)
+    data = body.model_dump(exclude_unset=True)
+    note = data.pop("note", "")
+    logic.patch_case(db, who, c, data, note)
+    db.commit()
+    return CaseBrief.model_validate(c)
+
+
+@router.post("/cases", response_model=CaseBrief, status_code=201)
+def create_case(body: CaseCreate, db: Session = Depends(get_db), who: Principal = Depends(require(role="lawyer"))):
+    """Завести дело вручную (например, по иску). Если найдены похожие дела и не указано force — 409 со списком."""
+    if not (body.uid or body.case_number):
+        raise HTTPException(400, "Нужен УИД или номер дела (для иска — номер материала М-…)")
+    dups = logic.find_duplicates(db, body)
+    if dups and not body.force:
+        raise HTTPException(409, {"message": "Похожие дела уже есть — проверьте, не дубль ли это", "duplicates": dups})
+    if body.uid and db.scalar(select(Case.id).where(Case.uid == body.uid.strip())):
+        raise HTTPException(409, "Дело с таким УИД уже есть")
+    if body.court_code and not body.court_name:
+        body.court_name = logic.court_name_for(db, body.court_code)
+    c = Case(uid=(body.uid or "").strip() or None, court_code=body.court_code or "", case_number=body.case_number or "")
+    db.add(c)
+    db.flush()
+    data = body.model_dump(exclude={"force", "aliases", "extra", "uid", "court_code", "case_number"}, exclude_none=True)
+    for k, v in data.items():
+        setattr(c, k, v)
+    for n in {x.strip() for x in [body.case_number or "", *body.aliases] if x and x.strip()}:
+        c.aliases.append(CaseAlias(court_code=c.court_code, number=n))
+    db.flush()
+    log(db, who, "case_created", "case", c.id, c.id, uid=c.uid, number=c.case_number, manual=True,
+        forced=bool(dups))
     db.commit()
     return CaseBrief.model_validate(c)
 

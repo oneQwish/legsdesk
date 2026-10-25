@@ -238,9 +238,54 @@ class CaseOut(CaseBrief):
 
 
 class CasePatch(BaseModel):
+    """Правка реквизитов дела юристом. None — не менять; пустая строка — очистить."""
+
+    uid: str | None = None
+    court_code: str | None = None
+    court_name: str | None = None
+    case_number: str | None = None
+    legal_entity: str | None = None
+    complex: str | None = None
+    building: str | None = None
+    flat: str | None = None
+    contract_no: str | None = None
+    plaintiffs: str | None = None
+    subject: str | None = None
     responsible: str | None = None
     stage: str | None = None
     status: str | None = None
+    outcome: str | None = None
+    appeal_flag: bool | None = None
+    note: str = Field("", description="Комментарий к правке — попадёт в журнал")
+
+
+class CaseCreate(CaseIn):
+    """Новое дело из интерфейса. force — создать, даже если найдены похожие дела."""
+
+    force: bool = False
+
+
+class CourtIO(ORM):
+    code: str = Field(min_length=1, max_length=64)
+    name: str = Field(min_length=1, max_length=512)
+    short_name: str = ""
+    region: str = ""
+    address: str = ""
+    uid_prefix: str = ""
+    active: bool = True
+
+
+class EntityIn(BaseModel):
+    name: str = Field(min_length=1, max_length=128)
+    full_name: str = ""
+    inn: str = ""
+    ogrn: str = ""
+    address: str = ""
+    active: bool = True
+
+
+class EntityOut(EntityIn, ORM):
+    id: int
 
 
 class Page[T](BaseModel):

@@ -25,7 +25,7 @@ from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, Settings
 SETTINGS_FILE = Path(__file__).resolve().parents[1] / "settings.toml"
 
 # Только переменные окружения / .env — никогда в settings.toml
-SECRETS = {"secret_key", "database_url", "docflow_password", "dev_password"}
+SECRETS = {"secret_key", "database_url", "docflow_password", "dev_password", "smtp_password"}
 
 
 class Settings(BaseSettings):
@@ -35,12 +35,14 @@ class Settings(BaseSettings):
     timezone: str = "Europe/Moscow"
     frontend_dist: str = ""
     upkeep_interval_minutes: int = 60
+    public_url: str = ""
 
     # --- секреты и адрес базы (только окружение) --------------------------------------------
     database_url: str = "postgresql+psycopg://postgres@localhost:5433/lawdesk"
     secret_key: str = "change-me"
     docflow_password: str = ""
     dev_password: str = "dev"
+    smtp_password: str = ""
 
     # --- [auth] -----------------------------------------------------------------------------
     auth_mode: str = "ldap"
@@ -92,6 +94,25 @@ class Settings(BaseSettings):
     facet_limit: int = 200
     feed_sequence_batch: int = 50000
 
+    # --- [notify] ---------------------------------------------------------------------------
+    notify_channels: list[str] = ["inapp"]
+    deadline_remind_days: int = 3
+    smtp_host: str = ""
+    smtp_port: int = 25
+    smtp_user: str = ""
+    smtp_from: str = "lawdesk@company.local"
+    smtp_tls: bool = False
+
+    # --- [documents] ------------------------------------------------------------------------
+    forms_dir: str = ""
+    reports_dir: str = "./reports"
+    report_weekday: int = 1
+    report_hour: int = 8
+
+    # --- [enforcement] ----------------------------------------------------------------------
+    writ_presentation_years: int = 3
+    penalty_file: str = ""
+
     # --- [tasks] ----------------------------------------------------------------------------
     task_default_lease_seconds: int = 600
 
@@ -116,7 +137,7 @@ class Settings(BaseSettings):
 
 # В каком разделе файла лежит каждая настройка (раздел — только для удобства чтения файла)
 SECTIONS: dict[str, list[str]] = {
-    "server": ["timezone", "frontend_dist", "upkeep_interval_minutes"],
+    "server": ["timezone", "frontend_dist", "upkeep_interval_minutes", "public_url"],
     "auth": ["auth_mode", "session_hours", "cookie_secure", "login_max_failures", "login_lockout_minutes",
              "dev_role", "dev_roles"],
     "ldap": ["ldap_url", "ldap_domain", "ldap_base_dn", "ldap_group_admin", "ldap_group_lawyer", "ldap_group_viewer",
@@ -127,6 +148,9 @@ SECTIONS: dict[str, list[str]] = {
     "deadlines": ["soon_days", "calendar_min_nonworking", "calendar_max_nonworking", "fallback_holidays"],
     "limits": ["ingest_max_batch", "page_size_max", "conflicts_page_max", "journal_page_max", "feed_limit_max",
                "deadlines_limit_max", "case_events_limit", "facet_limit", "feed_sequence_batch"],
+    "notify": ["notify_channels", "deadline_remind_days", "smtp_host", "smtp_port", "smtp_user", "smtp_from", "smtp_tls"],
+    "documents": ["forms_dir", "reports_dir", "report_weekday", "report_hour"],
+    "enforcement": ["writ_presentation_years", "penalty_file"],
     "tasks": ["task_default_lease_seconds"],
     "interface": ["desk_strip_days", "desk_strip_max_days", "desk_hot_days", "desk_week_days", "desk_pile_size",
                   "deadlines_page_limit", "deadlines_group_limit", "goal_conflicts", "goal_deadlines", "goal_documents"],
@@ -205,7 +229,7 @@ def problems(s: Settings) -> list[str]:
         out.append(f"[storage] storage_backend = «{s.storage_backend}»: допустимо local или docflow")
     for name in Settings.model_fields:
         v = getattr(s, name)
-        if isinstance(v, int) and not isinstance(v, bool) and v <= 0:
+        if isinstance(v, int) and not isinstance(v, bool) and v <= 0 and name != "report_hour":
             out.append(f"{name} = {v}: нужно положительное число")
     for h in s.fallback_holidays:
         try:
@@ -217,6 +241,13 @@ def problems(s: Settings) -> list[str]:
         out.append("[deadlines] calendar_min_nonworking должно быть меньше calendar_max_nonworking")
     if s.desk_strip_days > s.desk_strip_max_days:
         out.append("[interface] desk_strip_days больше desk_strip_max_days")
+    bad_ch = set(s.notify_channels) - {"inapp", "email"}
+    if bad_ch:
+        out.append(f"[notify] notify_channels: неизвестные каналы {sorted(bad_ch)}; доступны inapp, email")
+    if "email" in s.notify_channels and not s.smtp_host:
+        out.append("[notify] канал email включён, но не задан smtp_host")
+    if not 1 <= s.report_weekday <= 7 or not 0 <= s.report_hour <= 23:
+        out.append("[documents] report_weekday — 1 (пн)…7 (вс), report_hour — 0…23")
     if not s.source_trust:
         out.append("[values] source_trust пуст — укажите источники от самого надёжного к наименее")
     return out

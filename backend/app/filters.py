@@ -19,7 +19,7 @@ from . import clock
 from .config import get_settings
 from .fields import FIELDS
 from .logic import search_cases_filter
-from .models import Case, CaseValue, Deadline, Document, Observation
+from .models import Case, CaseValue, Court, Deadline, Document, Observation
 
 DISPUTED = ("conflict", "appeal_possible")
 NONE = "—"  # значение фасета «не указано»
@@ -249,6 +249,9 @@ def facet_counts(db, f: CaseFilter, limit: int | None = None) -> dict[str, list[
         .join(Observation, and_(Observation.case_value_id == CaseValue.id, Observation.normalized != "")),
         label=lambda r: r[1])
     out["year"].sort(key=lambda x: x["value"], reverse=True)
+    names = {c.code: c.short_name or c.name for c in db.scalars(select(Court))}  # имена судов из справочника
+    for x in out["court"]:
+        x["label"] = names.get(x["value"], x["label"])
     return out
 
 

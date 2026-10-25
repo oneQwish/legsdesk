@@ -281,3 +281,104 @@ class SavedView(Base):
     color: Mapped[str] = mapped_column(String(16), default="ink")
     position: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class Court(Base):
+    """Справочник судов. Код — как в 1С/источнике (Case.court_code); короткое имя — для списков и карточек."""
+
+    __tablename__ = "courts"
+    code: Mapped[str] = mapped_column(String(64), primary_key=True)
+    name: Mapped[str] = mapped_column(String(512))
+    short_name: Mapped[str] = mapped_column(String(128), default="")
+    region: Mapped[str] = mapped_column(String(128), default="")
+    address: Mapped[str] = mapped_column(String(512), default="")
+    uid_prefix: Mapped[str] = mapped_column(String(16), default="")  # начало УИД дел этого суда, напр. 50RS0010
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+class LegalEntity(Base):
+    """Справочник юрлиц (ответчиков-застройщиков). name — как пишется в деле (Case.legal_entity)."""
+
+    __tablename__ = "legal_entities"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(128), unique=True)
+    full_name: Mapped[str] = mapped_column(String(512), default="")
+    inn: Mapped[str] = mapped_column(String(12), default="")
+    ogrn: Mapped[str] = mapped_column(String(15), default="")
+    address: Mapped[str] = mapped_column(String(512), default="")
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+class Assignment(Base):
+    """Поручение юристу: что сделать, к какому сроку, по какому делу (дело может быть не указано)."""
+
+    __tablename__ = "assignments"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    case_id: Mapped[int | None] = mapped_column(ForeignKey("cases.id", ondelete="CASCADE"), index=True)
+    title: Mapped[str] = mapped_column(String(256))
+    body: Mapped[str] = mapped_column(Text, default="")
+    assignee: Mapped[str] = mapped_column(String(128), index=True)  # логин исполнителя
+    author: Mapped[str] = mapped_column(String(128))
+    due_date: Mapped[date | None] = mapped_column(Date, index=True)
+    status: Mapped[str] = mapped_column(String(16), default="open", index=True)  # open | done | cancelled
+    result: Mapped[str] = mapped_column(Text, default="")  # что сделано (при закрытии)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    done_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class Notification(Base):
+    """Уведомление пользователю. Канал «в системе» — эта таблица; другие каналы (почта и т. п.) — отправители
+    в notify.py, включаются в settings.toml без изменения остального кода."""
+
+    __tablename__ = "notifications"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    login: Mapped[str] = mapped_column(String(128), index=True)
+    kind: Mapped[str] = mapped_column(String(32))  # deadline_soon | deadline_today | assignment | mention | conflict | report
+    title: Mapped[str] = mapped_column(String(256))
+    body: Mapped[str] = mapped_column(Text, default="")
+    link: Mapped[str] = mapped_column(String(256), default="")  # куда вести в интерфейсе: /cases/12
+    case_id: Mapped[int | None] = mapped_column(Integer)
+    dedup: Mapped[str | None] = mapped_column(String(128))  # ключ, чтобы одно и то же не приходило дважды
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+    read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    __table_args__ = (UniqueConstraint("login", "dedup", name="uq_notification_dedup"),)
+
+
+class Comment(Base):
+    """Обсуждение в деле. @логин в тексте — упоминание (уведомление). pinned — закреплённая заметка «что важно»."""
+
+    __tablename__ = "comments"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    case_id: Mapped[int] = mapped_column(ForeignKey("cases.id", ondelete="CASCADE"), index=True)
+    author: Mapped[str] = mapped_column(String(128))
+    text: Mapped[str] = mapped_column(Text)
+    mentions: Mapped[list] = mapped_column(JSON, default=list)
+    pinned: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    edited_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class Hearing(Base):
+    """Судебное заседание из внешнего календаря (например, «Судебный календарь»). Внешняя система —
+    владелец записи; здесь копия + привязка к делу. ext_uid — ключ записи в источнике."""
+
+    __tablename__ = "hearings"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    source: Mapped[str] = mapped_column(String(64))
+    ext_uid: Mapped[str] = mapped_column(String(128))
+    date: Mapped[date] = mapped_column(Date, index=True)
+    time: Mapped[str] = mapped_column(String(128), default="")
+    court: Mapped[str] = mapped_column(String(512), default="")
+    judge: Mapped[str] = mapped_column(String(256), default="")
+    case_text: Mapped[str] = mapped_column(Text, default="")  # поле «дело» как в источнике (номер + заметки)
+    case_numbers: Mapped[list] = mapped_column(JSON, default=list)  # номера, найденные в тексте
+    plaintiff: Mapped[str] = mapped_column(Text, default="")
+    defendant: Mapped[str] = mapped_column(Text, default="")
+    owners: Mapped[list] = mapped_column(JSON, default=list)
+    notes: Mapped[str] = mapped_column(Text, default="")
+    highlight: Mapped[str] = mapped_column(String(32), default="")
+    case_id: Mapped[int | None] = mapped_column(ForeignKey("cases.id", ondelete="SET NULL"), index=True)
+    link_method: Mapped[str] = mapped_column(String(32), default="")  # номер | вручную | ''
+    removed: Mapped[bool] = mapped_column(Boolean, default=False)  # исчезла из источника
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    __table_args__ = (UniqueConstraint("source", "ext_uid", name="uq_hearing_source_uid"),)

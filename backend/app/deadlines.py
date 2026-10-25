@@ -202,3 +202,30 @@ def close_passed_events(db: Session, today: date) -> int:
         db.add(Event(actor_type="system", actor="system", action="deadline_updated", entity="deadline",
                      entity_id=d.id, case_id=d.case_id, data={"changes": {"status": [old, d.status]}, "auto": True}))
     return len(rows)
+
+
+def remind(db: Session, today: date) -> int:
+    """Напоминания ответственным: о сроке — за deadline_remind_days дней и в день срока; о поручениях — в день
+    срока и при просрочке. Каждое напоминание приходит один раз (ключ dedup)."""
+    from .models import Assignment
+    from .notify import notify
+
+    days = get_settings().deadline_remind_days
+    n = 0
+    rows = db.scalars(select(Deadline).where(Deadline.status == "open", Deadline.due_date >= today,
+                                             Deadline.due_date <= today + timedelta(days=days)))
+    for d in rows:
+        if not d.case.responsible:
+            continue
+        today_ = d.due_date == today
+        n += notify(db, [d.case.responsible], "deadline_today" if today_ else "deadline_soon",
+                    f"{'Сегодня' if today_ else 'Срок ' + fmt(d.due_date)}: {d.title} — дело № {d.case.case_number}",
+                    body=d.rule.split("\n")[0], link=f"/cases/{d.case_id}?tab=deadlines", case_id=d.case_id,
+                    dedup=f"deadline:{d.id}:{d.due_date}:{'today' if today_ else 'soon'}")
+    for a in db.scalars(select(Assignment).where(Assignment.status == "open", Assignment.due_date.is_not(None),
+                                                 Assignment.due_date <= today)):
+        late = a.due_date < today
+        n += notify(db, [a.assignee], "assignment", f"{'Просрочено' if late else 'Сегодня'} поручение: {a.title}",
+                    link=f"/cases/{a.case_id}" if a.case_id else "/assignments", case_id=a.case_id,
+                    dedup=f"assignment:{a.id}:{'late' if late else 'today'}")
+    return n

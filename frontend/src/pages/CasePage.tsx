@@ -4,6 +4,7 @@ import { Topbar, useSession } from "../App";
 import { ACTION_LABEL, api, fmtDate, fmtDateTime, fmtValue, shortCourt, type CaseFull, type CaseValue, type Deadline, type EventItem } from "../api";
 import AwardBar, { type AwardPart } from "../components/AwardBar";
 import CasePath from "../components/CasePath";
+import CaseForm from "../components/CaseForm";
 import Chronology from "../components/Chronology";
 import ResolvePanel, { ObservationLine } from "../components/ResolvePanel";
 import { PromptModal, useToast } from "../components/overlay";
@@ -16,7 +17,7 @@ export default function CasePage() {
   const { can, refreshStats } = useSession();
   const nav = useNavigate();
   const [tab, setTab] = useState<Tab>("values");
-  const [dialog, setDialog] = useState<"" | "responsible" | "merge">("");
+  const [dialog, setDialog] = useState<"" | "responsible" | "merge" | "edit">("");
   const toast = useToast();
   const c = useLoad(() => api<CaseFull>(`/cases/${id}`), [id]);
   const data = c.data;
@@ -41,6 +42,7 @@ export default function CasePage() {
         sub={<span title={data.court_name}>{shortCourt(data.court_name)}{data.uid ? <> · УИД <span className="mono">{data.uid}</span></> : <> · <span className="badge appeal_possible">УИД нет</span></>}</span>}>
         {can("lawyer") && (
           <div className="row">
+            <button onClick={() => setDialog("edit")}>Реквизиты…</button>
             <button onClick={() => setDialog("responsible")}>Ответственный</button>
             <button onClick={() => setDialog("merge")}>Слить дубль…</button>
           </div>
@@ -108,6 +110,7 @@ export default function CasePage() {
       {tab === "chronology" && <Chronology c={data} />}
       {tab === "journal" && <JournalTab caseId={data.id} />}
 
+      {dialog === "edit" && <CaseForm c={data} onClose={() => setDialog("")} onSaved={c.reload} />}
       {dialog === "responsible" && (
         <PromptModal title="Ответственный юрист" label="Логин или ФИО" initial={data.responsible} onClose={() => setDialog("")}
           onSubmit={async (v) => {
@@ -187,6 +190,7 @@ function ValuesTab({ values, onChange }: { values: CaseValue[]; onChange: (v: Ca
 }
 
 function ValueRow({ v, open, toggle, onChange }: { v: CaseValue; open: boolean; toggle: () => void; onChange: (v: CaseValue) => void }) {
+  const { can } = useSession();
   const disputed = disputedV(v);
   return (
     <>
@@ -199,7 +203,7 @@ function ValueRow({ v, open, toggle, onChange }: { v: CaseValue; open: boolean; 
       {open && (
         <tr>
           <td colSpan={4} style={{ background: "var(--panel-2)" }}>
-            {disputed || v.status === "resolved" ? (
+            {disputed || v.status === "resolved" || can("lawyer") ? (
               <ResolvePanel value={v} onDone={onChange} />
             ) : (
               <div className="panel">{v.observations.map((o) => <ObservationLine key={o.id} o={o} kind={v.kind} />)}</div>

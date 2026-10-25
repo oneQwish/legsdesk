@@ -186,6 +186,11 @@ def recompute(db: Session, cv: CaseValue, case: Case | None = None) -> str:
     disputed = ("conflict", "appeal_possible")
     if old != cv.status and (old in disputed or cv.status in disputed):
         log(db, None, "value_status", "case_value", cv.id, case.id, field=cv.field, old=old, new=cv.status)
+    if cv.status in disputed and old not in disputed and case.responsible:
+        from .notify import notify
+
+        notify(db, [case.responsible], "conflict", f"Источники расходятся: {field_def(cv.field).label} — дело № {case.case_number}",
+               link=f"/cases/{case.id}", case_id=case.id, dedup=f"conflict:{cv.id}:{len(obs)}")
     return cv.status
 
 
@@ -291,3 +296,92 @@ def search_cases_filter(q: str):
     return or_(Case.uid.ilike(like), Case.case_number.ilike(like), Case.plaintiffs.ilike(like),
                Case.contract_no.ilike(like), Case.court_name.ilike(like),
                Case.id.in_(select(CaseAlias.case_id).where(CaseAlias.number.ilike(like))))
+
+
+# --- Правка и заведение дел юристом ----------------------------------------------------------
+
+EDITABLE = ("uid", "court_code", "court_name", "case_number", "legal_entity", "complex", "building", "flat",
+            "contract_no", "plaintiffs", "subject", "responsible", "stage", "status", "outcome", "appeal_flag")
+
+
+def court_name_for(db: Session, code: str) -> str | None:
+    from .models import Court
+
+    c = db.get(Court, code) if code else None
+    return c.name if c else None
+
+
+def patch_case(db: Session, who: Principal, case: Case, data: dict, note: str = "") -> dict:
+    """Изменить реквизиты дела. Возвращает {поле: [было, стало]}. Номер дела становится и псевдонимом."""
+    changes: dict = {}
+    if "uid" in data:
+        uid = (data["uid"] or "").strip() or None
+        if uid and uid != case.uid and db.scalar(select(Case.id).where(Case.uid == uid, Case.id != case.id)):
+            raise HTTPException(409, f"УИД {uid} уже у другого дела — откройте его и слейте дубли")
+        data["uid"] = uid
+    if data.get("court_code") and not data.get("court_name") and data["court_code"] != case.court_code:
+        name = court_name_for(db, data["court_code"])
+        if name:
+            data["court_name"] = name
+    for k in EDITABLE:
+        if k not in data:
+            continue
+        v = data[k] if k == "appeal_flag" or data[k] is None else str(data[k]).strip()
+        if k != "uid" and v is None:
+            continue
+        if getattr(case, k) != v:
+            changes[k] = [getattr(case, k), v]
+            setattr(case, k, v)
+    num = (data.get("case_number") or "").strip()
+    if num and not any(a.number == num for a in case.aliases):
+        owner = db.scalar(select(CaseAlias).where(CaseAlias.court_code == case.court_code, CaseAlias.number == num))
+        if owner and owner.case_id != case.id:
+            raise HTTPException(409, f"Номер {num} уже у дела #{owner.case_id} — это может быть дубль, слейте дела")
+        case.aliases.append(CaseAlias(court_code=case.court_code, number=num))
+    if changes:
+        db.flush()
+        log(db, who, "case_updated", "case", case.id, case.id, changes=changes, note=note)
+        if "appeal_flag" in changes:
+            for cv in case.values:
+                if cv.status in ("conflict", "appeal_possible"):
+                    cv.status = "single"  # пересчитать «возможна апелляция» по новому признаку
+                    recompute(db, cv, case)
+    return changes
+
+
+def _norm_people(s: str) -> set[str]:
+    """Фамилии из строки истцов: «Иванов И.И.; Петрова А.А.» → {"иванов", "петрова"}."""
+    import re
+
+    return {w for w in re.findall(r"[а-яёa-z]{3,}", (s or "").casefold().replace("ё", "е"))}
+
+
+def find_duplicates(db: Session, data, exclude_id: int | None = None, limit: int = 10) -> list[dict]:
+    """Похожие дела для нового: тот же УИД, тот же номер (у любого дела, в т.ч. псевдоним),
+    тот же договор, или та же квартира с теми же истцами."""
+    found: dict[int, list[str]] = {}
+
+    def add(ids, why):
+        for i in ids:
+            if i != exclude_id:
+                found.setdefault(i, []).append(why)
+
+    if data.uid:
+        add(db.scalars(select(Case.id).where(Case.uid == data.uid.strip())), "тот же УИД")
+    nums = [n.strip() for n in [data.case_number, *(data.aliases or [])] if n and n.strip()]
+    if nums:
+        add(db.scalars(select(Case.id).where(Case.case_number.in_(nums))), "тот же номер дела")
+        add(db.scalars(select(CaseAlias.case_id).where(CaseAlias.number.in_(nums))), "номер есть среди номеров дела")
+    if data.contract_no and data.contract_no.strip():
+        add(db.scalars(select(Case.id).where(Case.contract_no == data.contract_no.strip())), "тот же договор")
+    if data.flat and data.building:
+        people = _norm_people(data.plaintiffs or "")
+        for c in db.scalars(select(Case).where(Case.building == data.building.strip(), Case.flat == data.flat.strip())):
+            if not people or people & _norm_people(c.plaintiffs):
+                add([c.id], "та же квартира" + (" и истцы" if people else ""))
+    out = []
+    for cid, why in list(found.items())[:limit]:
+        c = db.get(Case, cid)
+        out.append({"id": c.id, "uid": c.uid, "case_number": c.case_number, "court_name": c.court_name,
+                    "plaintiffs": c.plaintiffs, "building": c.building, "flat": c.flat, "why": sorted(set(why))})
+    return out

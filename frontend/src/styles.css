@@ -551,3 +551,11 @@ tr[role="link"]:focus-visible { outline: 2px solid var(--ink); outline-offset: -
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
 }
+
+/* Формы в окнах: два столбца, на телефоне — один */
+.form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 14px; }
+.form-grid .wide { grid-column: 1 / -1; }
+.form-grid .field input, .form-grid .field select, .form-grid .field textarea { width: 100%; }
+@media (max-width: 640px) { .form-grid { grid-template-columns: minmax(0, 1fr); } }
+ul.dups { margin: 6px 0 0; padding-left: 18px; }
+ul.dups li { margin: 3px 0; }

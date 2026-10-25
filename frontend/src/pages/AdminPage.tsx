@@ -2,7 +2,9 @@ import { Topbar } from "../App";
 import { useState } from "react";
 import { api, fmtDateTime, type Page, type Service, type Task } from "../api";
 import { ErrorBox, useAction, useLoad } from "../components/ui";
-import { useToast } from "../components/overlay";
+import { Modal, useToast } from "../components/overlay";
+import type { Court, Entity } from "../components/CaseForm";
+import { invalidateCache } from "../api";
 
 /** Копирование в буфер: navigator.clipboard работает только по HTTPS — иначе через выделение текста. */
 async function copyText(text: string): Promise<boolean> {
@@ -20,7 +22,7 @@ async function copyText(text: string): Promise<boolean> {
   }
 }
 
-type Tab = "services" | "tasks" | "export" | "users";
+type Tab = "services" | "tasks" | "export" | "users" | "directories";
 
 export default function AdminPage() {
   const [tab, setTab] = useState<Tab>("services");
@@ -32,11 +34,13 @@ export default function AdminPage() {
         <button className={tab === "tasks" ? "on" : ""} onClick={() => setTab("tasks")}>Очередь задач</button>
         <button className={tab === "export" ? "on" : ""} onClick={() => setTab("export")}>Выгрузка и календарь</button>
         <button className={tab === "users" ? "on" : ""} onClick={() => setTab("users")}>Пользователи</button>
+        <button className={tab === "directories" ? "on" : ""} onClick={() => setTab("directories")}>Справочники</button>
       </div>
       {tab === "services" && <Services />}
       {tab === "tasks" && <Tasks />}
       {tab === "export" && <ExportTab />}
       {tab === "users" && <Users />}
+      {tab === "directories" && <Directories />}
     </>
   );
 }
@@ -278,6 +282,98 @@ function Users() {
           </tbody>
         </table>
       </div>
+    </div>
+  );
+}
+
+
+/* --------------------------------- справочники --------------------------------- */
+
+const COURT_FIELDS: [keyof Court, string][] = [["code", "Код (как в 1С)"], ["name", "Полное название"], ["short_name", "Короткое название"],
+  ["region", "Регион"], ["address", "Адрес"], ["uid_prefix", "Начало УИД (50RS0010)"]];
+const ENTITY_FIELDS: [keyof Entity, string][] = [["name", "Как в деле (ГС-Саввино)"], ["full_name", "Полное наименование"], ["inn", "ИНН"],
+  ["ogrn", "ОГРН"], ["address", "Адрес"]];
+
+function Directories() {
+  const courts = useLoad(() => api<Court[]>("/directories/courts"), []);
+  const entities = useLoad(() => api<Entity[]>("/directories/entities"), []);
+  const [court, setCourt] = useState<Partial<Court> | null>(null);
+  const [entity, setEntity] = useState<Partial<Entity> | null>(null);
+  const { run, busy } = useAction();
+  const saveCourt = () => run(async () => {
+    await api(`/directories/courts/${encodeURIComponent(court!.code ?? "")}`, { method: "PUT", json: { active: true, ...court } });
+    invalidateCache("/directories");
+    setCourt(null);
+    courts.reload();
+  }, "Суд сохранён");
+  const saveEntity = () => run(async () => {
+    const e = entity!;
+    await api(e.id ? `/directories/entities/${e.id}` : "/directories/entities", { method: e.id ? "PUT" : "POST", json: { active: true, ...e } });
+    invalidateCache("/directories");
+    setEntity(null);
+    entities.reload();
+  }, "Юрлицо сохранено");
+  return (
+    <div className="stack">
+      <div className="muted small">Справочники можно заполнить вручную или загрузить из 1С коннектором (POST /api/v1/ingest/courts, /ingest/entities).
+        Переименование юрлица меняет его и во всех делах.</div>
+      <div className="panel table-wrap">
+        <div className="row pad"><h2 style={{ margin: 0 }}>Суды</h2><span className="spacer" /><button onClick={() => setCourt({ code: "", name: "" })}>+ Суд</button></div>
+        <table>
+          <thead><tr><th>Код</th><th>Название</th><th>Коротко</th><th>Регион</th><th>УИД</th><th></th></tr></thead>
+          <tbody>
+            {courts.data?.map((c) => (
+              <tr key={c.code} style={{ opacity: c.active ? 1 : 0.5 }}>
+                <td className="mono small">{c.code}</td><td>{c.name}</td><td>{c.short_name}</td><td className="small">{c.region}</td>
+                <td className="mono small">{c.uid_prefix}</td><td><button onClick={() => setCourt(c)}>Изменить</button></td>
+              </tr>
+            ))}
+            {courts.data?.length === 0 && <tr><td colSpan={6} className="empty-state">Справочник пуст — дела показывают название суда из источника</td></tr>}
+          </tbody>
+        </table>
+      </div>
+      <div className="panel table-wrap">
+        <div className="row pad"><h2 style={{ margin: 0 }}>Юрлица</h2><span className="spacer" /><button onClick={() => setEntity({ name: "" })}>+ Юрлицо</button></div>
+        <table>
+          <thead><tr><th>Как в деле</th><th>Полное наименование</th><th>ИНН</th><th>ОГРН</th><th></th></tr></thead>
+          <tbody>
+            {entities.data?.map((e) => (
+              <tr key={e.id} style={{ opacity: e.active ? 1 : 0.5 }}>
+                <td><b>{e.name}</b></td><td>{e.full_name}</td><td className="mono small">{e.inn}</td><td className="mono small">{e.ogrn}</td>
+                <td><button onClick={() => setEntity(e)}>Изменить</button></td>
+              </tr>
+            ))}
+            {entities.data?.length === 0 && <tr><td colSpan={5} className="empty-state">Справочник пуст</td></tr>}
+          </tbody>
+        </table>
+      </div>
+      {court && (
+        <Modal title={courts.data?.some((c) => c.code === court.code) ? "Суд" : "Новый суд"} onClose={() => setCourt(null)}
+               footer={<><button onClick={() => setCourt(null)}>Отмена</button><button className="primary" disabled={busy || !court.code || !court.name} onClick={saveCourt}>Сохранить</button></>}>
+          <div className="form-grid">
+            {COURT_FIELDS.map(([k, label]) => (
+              <label key={k} className="field">{label}
+                <input value={String(court[k] ?? "")} disabled={k === "code" && !!courts.data?.some((c) => c.code === court.code)}
+                       onChange={(e) => setCourt({ ...court, [k]: e.target.value })} />
+              </label>
+            ))}
+            <label className="row small"><input type="checkbox" checked={court.active ?? true} onChange={(e) => setCourt({ ...court, active: e.target.checked })} /> Действует (показывать в выборе)</label>
+          </div>
+        </Modal>
+      )}
+      {entity && (
+        <Modal title={entity.id ? "Юрлицо" : "Новое юрлицо"} onClose={() => setEntity(null)}
+               footer={<><button onClick={() => setEntity(null)}>Отмена</button><button className="primary" disabled={busy || !entity.name} onClick={saveEntity}>Сохранить</button></>}>
+          <div className="form-grid">
+            {ENTITY_FIELDS.map(([k, label]) => (
+              <label key={k} className="field">{label}
+                <input value={String(entity[k] ?? "")} onChange={(e) => setEntity({ ...entity, [k]: e.target.value })} />
+              </label>
+            ))}
+            <label className="row small"><input type="checkbox" checked={entity.active ?? true} onChange={(e) => setEntity({ ...entity, active: e.target.checked })} /> Действует</label>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }

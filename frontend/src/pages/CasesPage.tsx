@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { Topbar } from "../App";
+import { Topbar, useSession } from "../App";
+import CaseForm from "../components/CaseForm";
 import { api, fmtDate, qs, shortCourt, type CaseBrief, type Page } from "../api";
 import CaseCard, { caseTone } from "../components/CaseCard";
 import FilterPanel, { ActiveChips, activeCount } from "../components/FilterPanel";
@@ -22,6 +23,8 @@ export default function CasesPage() {
   const nav = useNavigate();
   const [sp, setSp] = useSearchParams();
   const [drawer, setDrawer] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const { can } = useSession();
   const [mode, setModeState] = useState<Mode>(savedMode);
   const params = Object.fromEntries(sp.entries());
   const page = Number(params.page ?? 1);
@@ -50,6 +53,8 @@ export default function CasesPage() {
   return (
     <>
       <Topbar title="Дела" sub="Фильтры слева можно комбинировать; набор сохраняется подборкой и выкладывается на стол.">
+        {can("lawyer") && <button className="primary" onClick={() => setCreating(true)}>+ Новое дело</button>}
+        {creating && <CaseForm onClose={() => setCreating(false)} />}
         <div className="seg" role="group" aria-label="Вид">
           <button className={mode === "cards" ? "on" : ""} aria-pressed={mode === "cards"} onClick={() => setMode("cards")}><Icon name="spread" size={14} /> Карточки</button>
           <button className={mode === "table" ? "on" : ""} aria-pressed={mode === "table"} onClick={() => setMode("table")}><Icon name="table" size={14} /> Таблица</button>
