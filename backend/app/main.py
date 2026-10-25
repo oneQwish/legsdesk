@@ -12,7 +12,7 @@ from . import clock
 from . import deadlines as dl
 from .config import get_settings, problems
 from .db import SessionLocal, engine, init_db
-from .routers import (admin, analytics, auth, backups, cases, enforcement, forms, penalty, conflicts, deadlines, desk, directories, documents, export, hearings, ingest,
+from .routers import (admin, analytics, auth, backups, bulk, cases, enforcement, forms, penalty, conflicts, deadlines, desk, directories, documents, export, hearings, ingest,
                       settings, tasks, views, work)
 
 DESCRIPTION = """
@@ -80,7 +80,7 @@ async def lifespan(_: FastAPI):
 app = FastAPI(title="Рабочее место юриста", version="0.1.0", description=DESCRIPTION, lifespan=lifespan,
               docs_url="/api/docs", openapi_url="/api/openapi.json", redoc_url=None)
 
-for r in (auth, cases, conflicts, documents, deadlines, ingest, tasks, export, admin, views, desk, settings, directories,
+for r in (auth, bulk, cases, conflicts, documents, deadlines, ingest, tasks, export, admin, views, desk, settings, directories,
           work, hearings, backups, forms, enforcement, analytics, penalty):
     app.include_router(r.router)
 

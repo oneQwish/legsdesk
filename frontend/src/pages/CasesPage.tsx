@@ -3,6 +3,8 @@ import { createPortal } from "react-dom";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Topbar, useSession } from "../App";
 import CaseForm from "../components/CaseForm";
+import { BulkCasesModal } from "../components/Bulk";
+import { AssignmentModal } from "../components/Work";
 import { api, fmtDate, qs, shortCourt, type CaseBrief, type Page } from "../api";
 import CaseCard, { caseTone } from "../components/CaseCard";
 import FilterPanel, { ActiveChips, activeCount } from "../components/FilterPanel";
@@ -24,6 +26,8 @@ export default function CasesPage() {
   const [sp, setSp] = useSearchParams();
   const [drawer, setDrawer] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [sel, setSel] = useState<Set<number>>(new Set());
+  const [bulk, setBulk] = useState<"" | "fields" | "assign">("");
   const { can } = useSession();
   const [mode, setModeState] = useState<Mode>(savedMode);
   const params = Object.fromEntries(sp.entries());
@@ -78,6 +82,23 @@ export default function CasesPage() {
       </div>
       <ActiveChips />
       <ErrorBox error={list.error} />
+      {mode === "table" && can("lawyer") && sel.size > 0 && (
+        <div className="bulk-bar">
+          <b>Выбрано: {sel.size}</b>
+          {list.data && sel.size < list.data.total && (
+            <button className="link" onClick={async () => {
+              const fp = new URLSearchParams(sp); ["page", "size", "sort"].forEach((k) => fp.delete(k));
+              setSel(new Set(await api<number[]>(`/cases/ids${qs(fp)}`)));
+            }}>выбрать все по фильтру ({list.data.total})</button>
+          )}
+          <span className="spacer" />
+          <button onClick={() => setBulk("fields")}>Ответственный, стадия…</button>
+          <button onClick={() => setBulk("assign")}>Поручение…</button>
+          <button className="link" onClick={() => setSel(new Set())}>снять выбор</button>
+        </div>
+      )}
+      {bulk === "fields" && <BulkCasesModal ids={[...sel]} onClose={() => setBulk("")} onDone={() => { setSel(new Set()); list.reload(); }} />}
+      {bulk === "assign" && <AssignmentModal caseIds={[...sel]} onClose={() => setBulk("")} onDone={() => setSel(new Set())} />}
 
       {mode === "cards" ? (
         <>
@@ -92,6 +113,13 @@ export default function CasesPage() {
             <table>
               <thead>
                 <tr>
+                  {can("lawyer") && (
+                    <th style={{ width: 28 }}>
+                      <input type="checkbox" aria-label="Выбрать все на странице"
+                             checked={!!list.data?.items.length && list.data.items.every((c) => sel.has(c.id))}
+                             onChange={(e) => { const n = new Set(sel); list.data?.items.forEach((c) => (e.target.checked ? n.add(c.id) : n.delete(c.id))); setSel(n); }} />
+                    </th>
+                  )}
                   <th style={{ width: 4, padding: 0 }}></th>
                   <th>Дело</th>
                   <th>Истцы</th>
@@ -105,6 +133,12 @@ export default function CasesPage() {
               <tbody>
                 {list.data?.items.map((c) => (
                   <tr key={c.id} className={`clickable ${caseTone(c)}`} {...clickable(() => nav(`/cases/${c.id}`))}>
+                    {can("lawyer") && (
+                      <td onClick={(e) => e.stopPropagation()}>
+                        <input type="checkbox" aria-label={`Выбрать дело ${c.case_number}`} checked={sel.has(c.id)}
+                               onChange={(e) => { const n = new Set(sel); if (e.target.checked) n.add(c.id); else n.delete(c.id); setSel(n); }} />
+                      </td>
+                    )}
                     <td style={{ padding: 0, background: "var(--tone)" }}></td>
                     <td className="nowrap">
                       <b className="serif" style={{ fontSize: 15 }}>{c.case_number || "без номера"}</b>

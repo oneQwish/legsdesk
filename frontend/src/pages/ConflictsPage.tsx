@@ -4,12 +4,14 @@ import { Topbar, useSession } from "../App";
 import { api, qs, shortCourt, type CaseBrief, type CaseValue, type Page } from "../api";
 import { ActiveChips, FilterButton, filterParams } from "../components/FilterPanel";
 import ResolvePanel from "../components/ResolvePanel";
+import { BulkResolveModal } from "../components/Bulk";
 import { ErrorBox, Pager, StatusBadge, clickable, useLoad } from "../components/ui";
 
 type Item = { value: CaseValue; case: CaseBrief };
 
 export default function ConflictsPage() {
-  const { refreshStats } = useSession();
+  const { refreshStats, can } = useSession();
+  const [bulk, setBulk] = useState(false);
   const [sp, setSp] = useSearchParams();
   const field = sp.get("field") ?? "";
   const page = Number(sp.get("page") ?? 1);
@@ -62,8 +64,11 @@ export default function ConflictsPage() {
         {fields.data?.map((f) => <option key={f.key} value={f.key}>{f.label}</option>)}
       </select>
         <FilterButton page="conflicts" />
+        {can("lawyer") && <button onClick={() => setBulk(true)}>Массово…</button>}
       </Topbar>
       <ActiveChips />
+      {bulk && <BulkResolveModal idsQuery={qs(new URLSearchParams([...filterParams(sp), ["has_conflicts", "true"]]))} field={field}
+                                 onClose={() => setBulk(false)} onDone={() => { list.reload(); refreshStats(); }} />}
       <ErrorBox error={list.error} />
       {list.data && items.length === 0 && list.data.total === 0 ? (
         <div className="panel empty-state">Конфликтов нет 🎉</div>

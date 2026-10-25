@@ -592,3 +592,8 @@ tr.hl td:first-child { box-shadow: inset 3px 0 var(--seal); }
 .mini-bar { display: inline-block; width: 80px; height: 6px; border-radius: 3px; background: var(--panel-2); vertical-align: middle; margin-right: 6px; overflow: hidden; }
 .mini-bar > span { display: block; height: 100%; border-radius: 3px; }
 tfoot th { border-top: 1px solid var(--line); }
+
+.bulk-bar { position: sticky; top: 8px; z-index: 5; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  background: var(--ink); color: var(--paper); padding: 8px 12px; border-radius: 10px; margin-bottom: 8px; }
+.bulk-bar button:not(.link) { background: var(--paper); color: var(--ink); }
+.bulk-bar .link { color: var(--paper); }
