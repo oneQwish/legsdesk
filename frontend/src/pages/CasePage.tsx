@@ -5,6 +5,7 @@ import { ACTION_LABEL, api, fmtDate, fmtDateTime, fmtValue, shortCourt, type Ass
 import AwardBar, { type AwardPart } from "../components/AwardBar";
 import CasePath from "../components/CasePath";
 import CaseForm from "../components/CaseForm";
+import { FormsModal } from "../components/Forms";
 import { AssignmentList, AssignmentModal, Discussion, HearingList, PinnedNotes } from "../components/Work";
 import Chronology from "../components/Chronology";
 import ResolvePanel, { ObservationLine } from "../components/ResolvePanel";
@@ -22,6 +23,7 @@ export default function CasePage() {
   const [sp] = useSearchParams();
   const [tab, setTab] = useState<Tab>(TABS.includes(sp.get("tab") as Tab) ? (sp.get("tab") as Tab) : "values");
   const [giving, setGiving] = useState(false);
+  const [forming, setForming] = useState(false);
   const [dialog, setDialog] = useState<"" | "responsible" | "merge" | "edit">("");
   const toast = useToast();
   const c = useLoad(() => api<CaseFull>(`/cases/${id}`), [id]);
@@ -49,6 +51,7 @@ export default function CasePage() {
           <div className="row">
             <button onClick={() => setDialog("edit")}>Реквизиты…</button>
             <button onClick={() => setGiving(true)}>Поручение…</button>
+            <button onClick={() => setForming(true)}>Документ по шаблону…</button>
             <button onClick={() => setDialog("responsible")}>Ответственный</button>
             <button onClick={() => setDialog("merge")}>Слить дубль…</button>
           </div>
@@ -120,6 +123,7 @@ export default function CasePage() {
       {tab === "journal" && <JournalTab caseId={data.id} />}
       {tab === "discussion" && <Discussion caseId={data.id} />}
       {tab === "work" && <WorkTab caseId={data.id} onGive={() => setGiving(true)} />}
+      {forming && <FormsModal caseId={data.id} onClose={() => setForming(false)} />}
       {giving && <AssignmentModal caseId={data.id} onClose={() => setGiving(false)} onDone={() => setTab("work")} />}
 
       {dialog === "edit" && <CaseForm c={data} onClose={() => setDialog("")} onSaved={c.reload} />}

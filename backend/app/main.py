@@ -12,7 +12,7 @@ from . import clock
 from . import deadlines as dl
 from .config import get_settings, problems
 from .db import SessionLocal, engine, init_db
-from .routers import (admin, auth, backups, cases, conflicts, deadlines, desk, directories, documents, export, hearings, ingest,
+from .routers import (admin, auth, backups, cases, forms, conflicts, deadlines, desk, directories, documents, export, hearings, ingest,
                       settings, tasks, views, work)
 
 DESCRIPTION = """
@@ -76,7 +76,7 @@ app = FastAPI(title="Рабочее место юриста", version="0.1.0", d
               docs_url="/api/docs", openapi_url="/api/openapi.json", redoc_url=None)
 
 for r in (auth, cases, conflicts, documents, deadlines, ingest, tasks, export, admin, views, desk, settings, directories,
-          work, hearings, backups):
+          work, hearings, backups, forms):
     app.include_router(r.router)
 
 

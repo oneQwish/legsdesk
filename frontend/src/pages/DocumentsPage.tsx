@@ -2,6 +2,7 @@ import { Topbar } from "../App";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { api, fmtDate, qs, type DocumentBrief, type Page } from "../api";
 import { ErrorBox, Pager, clickable, useLoad } from "../components/ui";
+import { TextSearch } from "../components/Forms";
 
 export default function DocumentsPage() {
   const nav = useNavigate();
@@ -18,7 +19,13 @@ export default function DocumentsPage() {
 
   return (
     <>
-      <Topbar title="Документы" sub="Сканы, цифровые оригиналы писем, иски и акты." />
+      <Topbar title="Документы" sub="Сканы, цифровые оригиналы писем, иски и акты.">
+        <div className="seg" role="group" aria-label="Режим">
+          <button className={params.mode !== "text" ? "on" : ""} aria-pressed={params.mode !== "text"} onClick={() => set({ mode: "" })}>Список</button>
+          <button className={params.mode === "text" ? "on" : ""} aria-pressed={params.mode === "text"} onClick={() => set({ mode: "text" })}>Поиск по тексту</button>
+        </div>
+      </Topbar>
+      {params.mode === "text" ? <TextSearch /> : <>
       <div className="panel pad row" style={{ marginBottom: 12 }}>
         <input className="grow" aria-label="Поиск документов" placeholder="Имя файла, трек-номер или sha256" defaultValue={params.q ?? ""}
                onKeyDown={(e) => e.key === "Enter" && set({ q: (e.target as HTMLInputElement).value })} />
@@ -57,6 +64,7 @@ export default function DocumentsPage() {
         </div>
         {list.data && <Pager page={page} size={list.data.size} total={list.data.total} onPage={(p) => set({ page: String(p) })} />}
       </div>
+      </>}
     </>
   );
 }

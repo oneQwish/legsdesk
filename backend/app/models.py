@@ -24,6 +24,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    literal_column,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -186,6 +187,10 @@ class Document(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     case: Mapped[Case | None] = relationship(back_populates="documents")
+    # то же, что migrations/0002_documents_fulltext.sql (для новых баз)
+    __table_args__ = (Index("ix_documents_text_fts", func.to_tsvector(literal_column("'russian'"),
+                                                                    func.coalesce(literal_column("text"), "")),
+                            postgresql_using="gin"),)
 
 
 class Deadline(Base):

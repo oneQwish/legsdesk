@@ -3,6 +3,7 @@ import { useState } from "react";
 import { api, fmtDateTime, type Page, type Service, type Task } from "../api";
 import { ErrorBox, useAction, useLoad } from "../components/ui";
 import { Modal, useToast } from "../components/overlay";
+import { FormsAdmin } from "../components/Forms";
 import type { Court, Entity } from "../components/CaseForm";
 import { invalidateCache } from "../api";
 
@@ -22,7 +23,7 @@ async function copyText(text: string): Promise<boolean> {
   }
 }
 
-type Tab = "services" | "tasks" | "export" | "users" | "directories" | "backups";
+type Tab = "services" | "tasks" | "export" | "users" | "directories" | "backups" | "forms";
 
 export default function AdminPage() {
   const [tab, setTab] = useState<Tab>("services");
@@ -35,6 +36,7 @@ export default function AdminPage() {
         <button className={tab === "export" ? "on" : ""} onClick={() => setTab("export")}>Выгрузка и календарь</button>
         <button className={tab === "users" ? "on" : ""} onClick={() => setTab("users")}>Пользователи</button>
         <button className={tab === "directories" ? "on" : ""} onClick={() => setTab("directories")}>Справочники</button>
+        <button className={tab === "forms" ? "on" : ""} onClick={() => setTab("forms")}>Печатные формы</button>
         <button className={tab === "backups" ? "on" : ""} onClick={() => setTab("backups")}>Резервные копии</button>
       </div>
       {tab === "services" && <Services />}
@@ -43,6 +45,7 @@ export default function AdminPage() {
       {tab === "users" && <Users />}
       {tab === "directories" && <Directories />}
       {tab === "backups" && <Backups />}
+      {tab === "forms" && <FormsAdmin />}
     </>
   );
 }

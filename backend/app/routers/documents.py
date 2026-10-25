@@ -44,6 +44,27 @@ def list_documents(
     return Page[DocumentBrief](items=rows, total=total, page=page, size=size)
 
 
+@router.get("/search")
+def search_text(q: str = Query(min_length=2, max_length=300), limit: int = Query(30, ge=1, le=200),
+                db: Session = Depends(get_db), _: Principal = Depends(require(role="viewer", scope="read"))):
+    """Поиск по текстам документов (русская морфология; «"точная фраза"», «-исключить», «или»).
+    Отрывки: совпадения обрамлены символами \u0002 … \u0003 (интерфейс подсвечивает)."""
+    from sqlalchemy import text as sql
+
+    rows = db.execute(sql("""
+        SELECT d.id, d.filename, d.kind, d.act_type, d.act_date, d.case_id, c.case_number,
+               ts_rank(to_tsvector('russian', coalesce(d.text, '')), query) AS rank,
+               ts_headline('russian', coalesce(d.text, ''), query,
+                           'StartSel=' || chr(2) || ', StopSel=' || chr(3) || ', MaxFragments=3, MaxWords=18, MinWords=6')
+                 AS snippet
+        FROM documents d LEFT JOIN cases c ON c.id = d.case_id, websearch_to_tsquery('russian', :q) AS query
+        WHERE to_tsvector('russian', coalesce(d.text, '')) @@ query
+        ORDER BY rank DESC, d.id DESC
+        LIMIT :limit
+    """), {"q": q, "limit": limit}).mappings().all()
+    return [dict(r) | {"act_date": r["act_date"].isoformat() if r["act_date"] else None, "rank": float(r["rank"])} for r in rows]
+
+
 def _doc(db: Session, doc_id: int) -> Document:
     d = db.get(Document, doc_id)
     if d is None:

@@ -13,7 +13,7 @@ export default function DocumentPage() {
   const { can } = useSession();
   const doc = useLoad(() => api<DocumentFull>(`/documents/${id}`), [id]);
   const extracted = useLoad(() => api<Extracted[]>(`/documents/${id}/observations`), [id]);
-  const [find, setFind] = useState("");
+  const [find, setFind] = useState(sp.get("find") ?? ""); // из поиска по тексту — сразу подсветить найденное
   const [linking, setLinking] = useState(false);
   const toast = useToast();
   const d = doc.data;

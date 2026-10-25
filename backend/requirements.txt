@@ -10,3 +10,4 @@ ldap3==2.9.1
 openpyxl==3.1.5
 httpx==0.28.1
 tzdata==2025.2
+docxtpl==0.20.2

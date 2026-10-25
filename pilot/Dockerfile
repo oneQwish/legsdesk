@@ -14,10 +14,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY backend/app ./app
 COPY backend/fields.toml backend/settings.toml ./
 COPY backend/migrations ./migrations
+COPY backend/forms ./forms
 COPY connectors /srv/connectors
 COPY --from=web /src/dist /srv/frontend/dist
 ENV LAWDESK_FRONTEND_DIST=/srv/frontend/dist LAWDESK_STORAGE_DIR=/data/storage TZ=Europe/Moscow PYTHONUNBUFFERED=1
-RUN useradd -r -u 1000 lawdesk && mkdir -p /data/storage && chown lawdesk /data/storage
+RUN useradd -r -u 1000 lawdesk && mkdir -p /data/storage && chown lawdesk /data/storage && chown -R lawdesk /srv/backend/forms
 USER lawdesk
 EXPOSE 8000
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

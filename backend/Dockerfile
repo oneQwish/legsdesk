@@ -5,7 +5,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY app ./app
 COPY fields.toml settings.toml ./
 COPY migrations ./migrations
-RUN useradd -r -u 1000 lawdesk && mkdir -p /data/storage && chown lawdesk /data/storage
+COPY forms ./forms
+RUN useradd -r -u 1000 lawdesk && mkdir -p /data/storage && chown lawdesk /data/storage /app/forms
 USER lawdesk
 ENV LAWDESK_STORAGE_DIR=/data/storage
 EXPOSE 8000
