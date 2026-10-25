@@ -45,7 +45,8 @@ export default function DayStrip({ days = settings.desk_strip_days }: { days?: n
         const day = dt.getDate();
         return (
           <button key={d.date} className={`strip-day ${i === 0 ? "today" : ""} ${d.working ? "" : "off"} ${d.total ? "has" : ""}`}
-                  onClick={() => nav(`/deadlines?due_from=${d.date}&due_before=${d.date}`)}
+                  onClick={() => nav(d.kinds.hearing && d.total === d.kinds.hearing
+                    ? `/hearings?from=${d.date}&to=${d.date}` : `/deadlines?due_from=${d.date}&due_before=${d.date}`)}
                   title={d.total ? `${dt.toLocaleDateString("ru-RU")}\n${title(d.kinds)}` : `${dt.toLocaleDateString("ru-RU")}: сроков нет${d.working ? "" : " (нерабочий день)"}`}>
             <span className="wd">{i === 0 ? "сегодня" : WD[dt.getDay()]}</span>
             <span className="d">{day}{(i === 0 || day === 1) && <small> {MON[dt.getMonth()]}</small>}</span>

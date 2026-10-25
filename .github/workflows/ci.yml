@@ -1,0 +1,84 @@
+# Автопроверка при каждом push и pull request: тесты сервера и коннектора, сборка интерфейса,
+# синтаксис shell-скриптов. Результат — на вкладке Actions репозитория на GitHub.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  backend:
+    name: Сервер (pytest + PostgreSQL 16)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      LAWDESK_DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/lawdesk_test
+      LAWDESK_SECRET_KEY: ci-only-test-secret-key-not-for-production-0123456789
+      PGPASSWORD: postgres
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: backend/requirements*.txt
+      - name: Зависимости
+        run: pip install -r backend/requirements-dev.txt
+      - name: Тестовая база
+        run: psql -h localhost -U postgres -c "CREATE DATABASE lawdesk_test"
+      - name: Тесты
+        working-directory: backend
+        run: python -m pytest -q
+
+  connectors:
+    name: Коннектор (pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Зависимости
+        run: pip install pytest
+      - name: Тесты
+        run: python -m pytest connectors/tests -q
+
+  frontend:
+    name: Интерфейс (сборка)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Зависимости
+        working-directory: frontend
+        run: npm ci
+      - name: Сборка
+        working-directory: frontend
+        run: npm run build
+
+  shell:
+    name: Shell-скрипты (синтаксис)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: sh -n
+        run: |
+          sh -n backup/backup.sh
+          sh -n connectors/запуск.sh
+      - name: Самопроверка прореживания копий
+        run: sh backup/backup.sh selftest

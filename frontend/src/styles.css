@@ -559,3 +559,29 @@ tr[role="link"]:focus-visible { outline: 2px solid var(--ink); outline-offset: -
 @media (max-width: 640px) { .form-grid { grid-template-columns: minmax(0, 1fr); } }
 ul.dups { margin: 6px 0 0; padding-left: 18px; }
 ul.dups li { margin: 3px 0; }
+
+/* Колокольчик уведомлений */
+.bell { position: relative; }
+.bell > button { position: relative; background: none; border: 0; color: inherit; padding: 8px; cursor: pointer; }
+.bell .dot { position: absolute; top: 2px; right: 0; }
+.bell-pop { position: fixed; left: 72px; bottom: 16px; width: min(420px, calc(100vw - 88px)); max-height: 70vh; display: flex;
+  flex-direction: column; z-index: 120; color: var(--ink); }
+.bell-list { overflow: auto; padding: 0 8px 8px; display: flex; flex-direction: column; gap: 2px; }
+.bell-item { display: flex; gap: 10px; text-align: left; background: none; border: 0; border-radius: 8px; padding: 8px; cursor: pointer;
+  color: inherit; width: 100%; }
+.bell-item:hover { background: var(--panel-2); }
+.bell-item .t { display: block; font-weight: 500; }
+.bell-item .b { display: block; font-size: 12px; color: var(--muted); white-space: pre-wrap; max-height: 3.2em; overflow: hidden; }
+.bell-item.unread .t::before { content: "● "; color: var(--seal); }
+.bell-kind { width: 4px; border-radius: 2px; background: var(--ink-2); flex: none; }
+.bell-kind.k-deadline_today, .bell-kind.k-conflict { background: var(--seal); }
+.bell-kind.k-deadline_soon, .bell-kind.k-hearing { background: var(--ochre); }
+.bell-kind.k-mention { background: var(--violet); }
+.bell-kind.k-assignment { background: var(--ok); }
+@media (max-width: 760px) { .bell-pop { left: 8px; right: 8px; bottom: 72px; width: auto; } }
+
+/* Обсуждение */
+.comment.pinned { border-left: 3px solid var(--ochre); }
+.mention { color: var(--violet); font-weight: 500; }
+.pinned-notes { display: flex; flex-direction: column; gap: 6px; margin: 8px 0; }
+tr.hl td:first-child { box-shadow: inset 3px 0 var(--seal); }

@@ -359,6 +359,17 @@ export const STATUS_LABEL: Record<string, string> = {
 
 export const ACTION_LABEL: Record<string, string> = {
   login: "Вход",
+  assignment_created: "Поручение дано",
+  assignment_updated: "Поручение изменено",
+  comment_added: "Комментарий",
+  comment_updated: "Комментарий изменён",
+  comment_deleted: "Комментарий удалён",
+  hearings_synced: "Заседания загружены",
+  hearing_linked: "Заседание привязано",
+  court_created: "Суд добавлен",
+  court_updated: "Суд изменён",
+  entity_created: "Юрлицо добавлено",
+  entity_updated: "Юрлицо изменено",
   case_created: "Дело создано",
   case_updated: "Дело изменено",
   case_merged: "Дела слиты",
@@ -385,3 +396,66 @@ export const ACTION_LABEL: Record<string, string> = {
   export: "Выгрузка",
   user_active: "Доступ пользователя",
 };
+
+// --- Ежедневная работа --------------------------------------------------------------------
+
+export interface Assignment {
+  id: number;
+  case_id: number | null;
+  title: string;
+  body: string;
+  assignee: string;
+  author: string;
+  due_date: string | null;
+  status: "open" | "done" | "cancelled";
+  result: string;
+  created_at: string;
+  done_at: string | null;
+  case_number?: string | null;
+  plaintiffs?: string | null;
+}
+
+export interface Notice {
+  id: number;
+  kind: string;
+  title: string;
+  body: string;
+  link: string;
+  case_id: number | null;
+  created_at: string;
+  read_at: string | null;
+}
+
+export interface Comment {
+  id: number;
+  case_id: number;
+  author: string;
+  text: string;
+  mentions: string[];
+  pinned: boolean;
+  created_at: string;
+  edited_at: string | null;
+}
+
+export interface Hearing {
+  id: number;
+  source: string;
+  ext_uid: string;
+  date: string;
+  time: string;
+  court: string;
+  judge: string;
+  case_text: string;
+  case_numbers: string[];
+  plaintiff: string;
+  defendant: string;
+  owners: string[];
+  notes: string;
+  highlight: string;
+  case_id: number | null;
+  link_method: string;
+  removed: boolean;
+  case_number?: string | null;
+}
+
+export type UserLogin = { login: string; name: string; role: string };

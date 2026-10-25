@@ -398,3 +398,61 @@ def test_connector_timeout_batch_retry_settings(tmp_path, monkeypatch):
         lc.load_config(write(tmp_path, base.replace('direction', 'timeout = "300"\ndirection'), "b.toml"))
     with pytest.raises(lc.ConfigError, match="retry_delays"):
         lc.load_config(write(tmp_path, base.replace('direction', 'retry_delays = 5\ndirection'), "c.toml"))
+
+
+def test_calendar_with_cookie_login(tmp_path, monkeypatch):
+    """Вход по логину (cookie) и снимок заседаний: эмулятор с тем же API, что у «Судебного календаря»."""
+    import http.server
+
+    seen = {}
+
+    class Cal(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def _send(self, code, obj, cookie=None):
+            b = json.dumps(obj).encode()
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json")
+            if cookie:
+                self.send_header("Set-Cookie", cookie)
+            self.end_headers()
+            self.wfile.write(b)
+
+        def do_POST(self):
+            body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            if self.path == "/api/login":
+                ok = body == {"login": "conn", "password": "secret"}
+                return self._send(200 if ok else 401, {"login": "conn"} if ok else {"error": "нет"}, "sk=tok; Path=/" if ok else None)
+            seen["snapshot"] = body
+            self._send(200, {"created": len(body["items"]), "updated": 0, "removed": 0, "linked": 1, "unlinked": 0})
+
+        def do_GET(self):
+            if "sk=tok" not in (self.headers.get("Cookie") or ""):
+                return self._send(401, {"error": "нужно войти"})
+            self._send(200, {"version": 2, "records": [
+                {"uid": "u1", "date": "2027-01-15", "time": "10:00", "court": "Суд", "judge": "", "case": "2-1/27, беседа",
+                 "plaintiff": "Орлов", "defendant": "ГС", "owners": ["popova", "kozlova"], "note2": "явка", "note3": "", "highlight": ""}]})
+
+    srv = http.server.HTTPServer(("127.0.0.1", 0), Cal)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{srv.server_port}"
+    text = (EXAMPLES / "судебный_календарь.toml").read_text(encoding="utf-8").replace("https://rasp.gslegalteam.ru", url)
+    cfg = lc.load_config(write(tmp_path, text))
+    monkeypatch.setenv("SK_LOGIN", "conn")
+    monkeypatch.setenv("SK_PASSWORD", "secret")
+
+    class LD:
+        def request(self, method, path, body=None, **kw):
+            assert path == "/api/v1/ingest/hearings"
+            seen["snapshot"] = body
+            return {"created": 1, "updated": 0, "removed": 0, "linked": 1, "unlinked": 0}
+
+    assert lc.run_in(cfg, tmp_path, LD(), None, dry=False) == 0
+    h = seen["snapshot"]["items"][0]
+    assert h["ext_uid"] == "u1" and h["owners"] == ["popova", "kozlova"] and h["notes"] == "явка" and seen["snapshot"]["full"]
+    monkeypatch.setenv("SK_PASSWORD", "wrong")
+    cfg = lc.load_config(write(tmp_path, text, "b.toml"))
+    with pytest.raises(lc.LinkError, match="неверный логин"):
+        lc.run_in(cfg, tmp_path, LD(), None, dry=False)
+    srv.shutdown()

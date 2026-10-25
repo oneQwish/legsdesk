@@ -1,22 +1,27 @@
 import { useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { Topbar, useSession } from "../App";
-import { ACTION_LABEL, api, fmtDate, fmtDateTime, fmtValue, shortCourt, type CaseFull, type CaseValue, type Deadline, type EventItem } from "../api";
+import { ACTION_LABEL, api, fmtDate, fmtDateTime, fmtValue, shortCourt, type Assignment, type CaseFull, type CaseValue, type Deadline, type EventItem, type Hearing } from "../api";
 import AwardBar, { type AwardPart } from "../components/AwardBar";
 import CasePath from "../components/CasePath";
 import CaseForm from "../components/CaseForm";
+import { AssignmentList, AssignmentModal, Discussion, HearingList, PinnedNotes } from "../components/Work";
 import Chronology from "../components/Chronology";
 import ResolvePanel, { ObservationLine } from "../components/ResolvePanel";
 import { PromptModal, useToast } from "../components/overlay";
 import { DueBadge, ErrorBox, StatusBadge, clickable, useAction, useLoad } from "../components/ui";
 
-type Tab = "values" | "chronology" | "documents" | "deadlines" | "journal";
+type Tab = "values" | "chronology" | "documents" | "deadlines" | "journal" | "discussion" | "work";
+const TABS: Tab[] = ["values", "chronology", "documents", "deadlines", "journal", "discussion", "work"];
 
 export default function CasePage() {
   const { id } = useParams();
   const { can, refreshStats } = useSession();
   const nav = useNavigate();
-  const [tab, setTab] = useState<Tab>("values");
+  // вкладка — из ссылки (уведомление ведёт сразу в «Обсуждение» или «Сроки»)
+  const [sp] = useSearchParams();
+  const [tab, setTab] = useState<Tab>(TABS.includes(sp.get("tab") as Tab) ? (sp.get("tab") as Tab) : "values");
+  const [giving, setGiving] = useState(false);
   const [dialog, setDialog] = useState<"" | "responsible" | "merge" | "edit">("");
   const toast = useToast();
   const c = useLoad(() => api<CaseFull>(`/cases/${id}`), [id]);
@@ -43,6 +48,7 @@ export default function CasePage() {
         {can("lawyer") && (
           <div className="row">
             <button onClick={() => setDialog("edit")}>Реквизиты…</button>
+            <button onClick={() => setGiving(true)}>Поручение…</button>
             <button onClick={() => setDialog("responsible")}>Ответственный</button>
             <button onClick={() => setDialog("merge")}>Слить дубль…</button>
           </div>
@@ -50,6 +56,7 @@ export default function CasePage() {
       </Topbar>
 
       <CasePath c={data} />
+      <PinnedNotes caseId={data.id} />
       <div className="case-summary">
       <div className="panel pad">
         <div className="facts">
@@ -82,6 +89,8 @@ export default function CasePage() {
           Сроки {openDl > 0 && <span className="badge single">{openDl}</span>}
         </button>
         <button className={tab === "chronology" ? "on" : ""} onClick={() => setTab("chronology")}>Хронология</button>
+        <button className={tab === "discussion" ? "on" : ""} onClick={() => setTab("discussion")}>Обсуждение</button>
+        <button className={tab === "work" ? "on" : ""} onClick={() => setTab("work")}>Поручения и заседания</button>
         <button className={tab === "journal" ? "on" : ""} onClick={() => setTab("journal")}>Журнал</button>
       </div>
 
@@ -109,6 +118,9 @@ export default function CasePage() {
       {tab === "deadlines" && <DeadlinesTab caseId={data.id} deadlines={data.deadlines} reload={c.reload} />}
       {tab === "chronology" && <Chronology c={data} />}
       {tab === "journal" && <JournalTab caseId={data.id} />}
+      {tab === "discussion" && <Discussion caseId={data.id} />}
+      {tab === "work" && <WorkTab caseId={data.id} onGive={() => setGiving(true)} />}
+      {giving && <AssignmentModal caseId={data.id} onClose={() => setGiving(false)} onDone={() => setTab("work")} />}
 
       {dialog === "edit" && <CaseForm c={data} onClose={() => setDialog("")} onSaved={c.reload} />}
       {dialog === "responsible" && (
@@ -327,4 +339,19 @@ export function describe(e: EventItem): string {
   }
   if (e.action === "value_status") return `${d.field}: ${d.old} → ${d.new}`;
   return Object.keys(d).length ? JSON.stringify(d, null, 0) : "";
+}
+
+function WorkTab({ caseId, onGive }: { caseId: number; onGive: () => void }) {
+  const { can } = useSession();
+  const a = useLoad(() => api<Assignment[]>(`/assignments?case_id=${caseId}&status=open,done,cancelled`), [caseId]);
+  const h = useLoad(() => api<Hearing[]>(`/hearings?case_id=${caseId}`), [caseId]);
+  return (
+    <div className="stack">
+      <div className="row"><div className="group-title" style={{ margin: 0 }}>Поручения</div><span className="spacer" />
+        {can("lawyer") && <button onClick={onGive}>+ Поручение</button>}</div>
+      {a.data && <AssignmentList items={a.data} reload={a.reload} showCase={false} />}
+      <div className="group-title">Заседания (из судебного календаря)</div>
+      {h.data && <HearingList items={h.data} reload={h.reload} showCase={false} />}
+    </div>
+  );
 }

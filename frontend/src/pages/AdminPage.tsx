@@ -22,7 +22,7 @@ async function copyText(text: string): Promise<boolean> {
   }
 }
 
-type Tab = "services" | "tasks" | "export" | "users" | "directories";
+type Tab = "services" | "tasks" | "export" | "users" | "directories" | "backups";
 
 export default function AdminPage() {
   const [tab, setTab] = useState<Tab>("services");
@@ -35,12 +35,14 @@ export default function AdminPage() {
         <button className={tab === "export" ? "on" : ""} onClick={() => setTab("export")}>Выгрузка и календарь</button>
         <button className={tab === "users" ? "on" : ""} onClick={() => setTab("users")}>Пользователи</button>
         <button className={tab === "directories" ? "on" : ""} onClick={() => setTab("directories")}>Справочники</button>
+        <button className={tab === "backups" ? "on" : ""} onClick={() => setTab("backups")}>Резервные копии</button>
       </div>
       {tab === "services" && <Services />}
       {tab === "tasks" && <Tasks />}
       {tab === "export" && <ExportTab />}
       {tab === "users" && <Users />}
       {tab === "directories" && <Directories />}
+      {tab === "backups" && <Backups />}
     </>
   );
 }
@@ -374,6 +376,45 @@ function Directories() {
           </div>
         </Modal>
       )}
+    </div>
+  );
+}
+
+
+/* -------------------------------- резервные копии -------------------------------- */
+
+type BackupStatus = {
+  configured: boolean; stale: boolean; error?: string; last_run?: string; last_ok?: string; ok?: boolean;
+  db_file?: string; db_size?: number; storage_file?: string; kept?: number; free_mb?: number; backup_time?: string;
+  restore_check?: { ok: boolean; details: string };
+};
+
+function Backups() {
+  const s = useLoad(() => api<BackupStatus>("/admin/backups"), []);
+  const d = s.data;
+  if (!d) return <ErrorBox error={s.error} />;
+  const mb = (n?: number) => (n ? `${(n / 1048576).toFixed(1)} МБ` : "—");
+  return (
+    <div className="stack">
+      <div className={`panel pad ${d.ok && !d.stale ? "" : "notice"}`}>
+        <h2 style={{ marginTop: 0 }}>{!d.configured ? "Копии не настроены" : d.ok && !d.stale ? "Копии в порядке" : "Внимание: проблема с копиями"}</h2>
+        {d.error && <div className="error">{d.error}</div>}
+        {d.configured && (
+          <div className="facts">
+            <div><span>Последний запуск</span>{fmtDateTime(d.last_run ?? null)}{d.stale && " — давно (больше суток)"}</div>
+            <div><span>Последняя успешная копия</span>{fmtDateTime(d.last_ok ?? null)}</div>
+            <div><span>Файл базы</span><span className="mono">{d.db_file ?? "—"}</span> ({mb(d.db_size)})</div>
+            <div><span>Файлы документов</span><span className="mono">{d.storage_file ?? "—"}</span></div>
+            <div><span>Проверка восстановления</span>{d.restore_check ? (d.restore_check.ok ? "✓ прошла" : "✗ не прошла") : "—"} <span className="muted small">{d.restore_check?.details}</span></div>
+            <div><span>Хранится копий</span>{d.kept ?? "—"}</div>
+            <div><span>Свободно на диске</span>{d.free_mb != null ? `${d.free_mb} МБ` : "—"}</div>
+            <div><span>Время ежедневной копии</span>{d.backup_time ?? "—"}</div>
+          </div>
+        )}
+      </div>
+      <div className="muted small">Копии делает контейнер backup раз в сутки: база — 30 дней ежедневно, 12 недель еженедельно, 12 месяцев ежемесячно;
+        каждая свежая копия проверяется развёртыванием во временную базу. Сделать копию сейчас: <span className="mono">docker compose exec backup backup.sh now</span>.
+        Храните копии и на другом сервере — см. «Администрирование», раздел 4.</div>
     </div>
   );
 }

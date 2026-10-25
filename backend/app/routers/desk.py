@@ -10,7 +10,7 @@ from .. import clock, deadlines as dl
 from ..config import get_settings
 from ..db import get_db
 from ..filters import CaseFilter
-from ..models import Case, Deadline, Event, User
+from ..models import Case, Deadline, Event, Hearing, User
 from ..security import Principal, require
 
 router = APIRouter(prefix="/api/v1/desk", tags=["Стол"])
@@ -33,6 +33,12 @@ def day_strip(
         .where(Deadline.status == "open", Deadline.due_date <= end, *f.where())
         .group_by(Deadline.due_date, Deadline.kind)
     ).all()
+    # заседания из календаря: привязанные к делам — с учётом фильтров; без дела — только когда фильтров нет
+    hq = (select(Hearing.date, func.count()).outerjoin(Case, Case.id == Hearing.case_id)
+          .where(Hearing.removed.is_(False), Hearing.date >= today, Hearing.date <= end))
+    conds = f.where()
+    hq = hq.where(Hearing.case_id.is_not(None), *conds) if conds else hq
+    rows = list(rows) + [(d, "hearing", n) for d, n in db.execute(hq.group_by(Hearing.date)).all()]
     cal = dl.WorkCalendar.from_db(db, {today.year, end.year})
     out, overdue = [], {}
     by_day: dict[date, dict[str, int]] = {}

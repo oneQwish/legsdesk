@@ -4,6 +4,8 @@ import { api, loadClientSettings, type Me, type Role, type Stats } from "./api";
 import { Icon } from "./components/icons";
 import { anyModalOpen, ToastProvider } from "./components/overlay";
 import QuickSearch from "./components/QuickSearch";
+import { Bell } from "./components/Work";
+import { AssignmentsPage, HearingsPage } from "./pages/WorkPages";
 import CasePage from "./pages/CasePage";
 import CasesPage from "./pages/CasesPage";
 import ConflictsPage from "./pages/ConflictsPage";
@@ -122,10 +124,13 @@ export default function App() {
             {item("/cases", "cases", "Дела")}
             {item("/conflicts", "conflicts", "Конфликты", conflicts)}
             {item("/deadlines", "deadlines", "Сроки", urgent)}
+            {item("/assignments", "assign", "Поручения")}
+            {item("/hearings", "hearing", "Заседания")}
             {item("/documents", "documents", "Документы")}
             {item("/journal", "journal", "Журнал")}
             {can("admin") && item("/admin", "services", "Сервисы и API")}
             <div className="rail-bottom">
+              <Bell />
               <a href="/api/docs" target="_blank" rel="noreferrer" data-tip="Документация API" aria-label="API"><Icon name="code" size={18} /></a>
               <button onClick={logout} data-tip={`${me.full_name || me.login} · ${ROLE_LABEL[me.role]}${me.auth_mode === "dev" ? " · dev" : ""} — выйти`} aria-label="Выйти">
                 <span className="avatar">{initials}</span>
@@ -142,6 +147,8 @@ export default function App() {
               <Route path="/documents" element={<DocumentsPage />} />
               <Route path="/documents/:id" element={<Suspense fallback={null}><ById page={DocumentPage} /></Suspense>} />
               <Route path="/journal" element={<JournalPage />} />
+              <Route path="/assignments" element={<AssignmentsPage />} />
+              <Route path="/hearings" element={<HearingsPage />} />
               <Route path="/admin" element={can("admin") ? <Suspense fallback={null}><AdminPage /></Suspense> : <Navigate to="/" />} />
               <Route path="*" element={<Navigate to="/" />} />
             </Routes>

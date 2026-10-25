@@ -113,6 +113,8 @@ def _date(v: str, fmt: str | None) -> str:
 
 def apply_filter(value: str, name: str, arg: str | None, maps: dict) -> str:
     """Фильтры шаблонов. Список — в docs/коннекторы.md, раздел «Фильтры»."""
+    if name == "join":  # список (например, ответственные) → строка через «; »
+        return (arg or "; ").join(map(str, value)) if isinstance(value, list) else ("" if value is None else str(value))
     v = "" if value is None else str(value)
     match name:
         case "trim": return v.strip()
@@ -135,7 +137,7 @@ def apply_filter(value: str, name: str, arg: str | None, maps: dict) -> str:
                 raise ConfigError(f"фильтр |map:{arg} — нет таблицы [maps.{arg}] в настройках")
             return str(table.get(v, table.get("*", v)))
         case _:
-            raise ConfigError(f"неизвестный фильтр |{name}. Доступны: trim, upper, lower, money, kopecks, int, date, digits, default, bool, first, replace, map")
+            raise ConfigError(f"неизвестный фильтр |{name}. Доступны: trim, upper, lower, money, kopecks, int, date, digits, default, bool, first, replace, map, join")
 
 
 def render(template, row: dict, maps: dict, strict: bool = True) -> str | None:
@@ -215,6 +217,44 @@ def _auth_header(cfg: dict) -> dict:
     return {"Authorization": "Basic " + base64.b64encode(f"{user}:{pwd}".encode()).decode()}
 
 
+def _env_text(value: str) -> str:
+    """«{env:ИМЯ}» в настройках → значение переменной окружения (пароли не пишутся в файл настроек)."""
+    def sub(m: re.Match) -> str:
+        name = m.group(1)
+        if name not in os.environ:
+            raise ConfigError(f"не задана переменная окружения {name} (впишите её в секреты.bat / секреты.sh)")
+        return os.environ[name]
+
+    return re.sub(r"\{env:([A-Za-z_][A-Za-z0-9_]*)\}", sub, str(value))
+
+
+def _session(cfg: dict, ctx) -> urllib.request.OpenerDirector | None:
+    """Вход по логину и паролю (login_url + [source.login_body]): система отвечает cookie сессии, дальше
+    все запросы идут с ней. Нужно для сайтов без API-ключей (например, «Судебный календарь»)."""
+    if not cfg.get("login_url"):
+        return None
+    if cfg.get("_opener") is None:
+        import http.cookiejar
+
+        handlers = [urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar())]
+        if ctx is not None:
+            handlers.append(urllib.request.HTTPSHandler(context=ctx))
+        opener = urllib.request.build_opener(*handlers)
+        body = {k: _env_text(v) for k, v in cfg.get("login_body", {}).items()}
+        req = urllib.request.Request(cfg["login_url"], data=json.dumps(body).encode(), method="POST",
+                                     headers={"Content-Type": "application/json", "Accept": "application/json"})
+        try:
+            with opener.open(req, timeout=cfg.get("timeout", 120)) as r:
+                r.read()
+        except urllib.error.HTTPError as e:
+            hint = " (неверный логин или пароль)" if e.code in (401, 403) else ""
+            raise LinkError(f"вход {cfg['login_url']} → HTTP {e.code}{hint}: {e.read().decode('utf-8', 'replace')[:200]}") from None
+        except urllib.error.URLError as e:
+            raise LinkError(f"вход {cfg['login_url']} — нет связи: {e.reason}") from None
+        cfg["_opener"] = opener
+    return cfg["_opener"]
+
+
 def _http_json(url: str, cfg: dict, method: str = "GET", body=None) -> object:
     """Запрос к внешней системе. Временные сбои (обрыв, 429, 5xx) повторяются с нарастающей паузой."""
     headers = {"Accept": "application/json", **_auth_header(cfg), **cfg.get("headers", {})}
@@ -226,14 +266,19 @@ def _http_json(url: str, cfg: dict, method: str = "GET", body=None) -> object:
     for attempt in range(len(RETRY_DELAYS) + 1):
         last = attempt == len(RETRY_DELAYS)
         req = urllib.request.Request(url, data=data, method=method, headers=headers)
+        opener = _session(cfg, ctx)
         try:
-            with urllib.request.urlopen(req, timeout=cfg.get("timeout", 120), context=ctx) as r:
+            with (opener.open(req, timeout=cfg.get("timeout", 120)) if opener
+                  else urllib.request.urlopen(req, timeout=cfg.get("timeout", 120), context=ctx)) as r:
                 raw = r.read()
             try:
                 return json.loads(raw.decode(r.headers.get_content_charset() or "utf-8")) if raw else None
             except ValueError:
                 raise LinkError(f"{method} {url} — ответ не в формате JSON: {raw[:200].decode('utf-8', 'replace')}") from None
         except urllib.error.HTTPError as e:
+            if e.code == 401 and opener is not None and not cfg.get("_relogged"):
+                cfg["_opener"], cfg["_relogged"] = None, True  # сессия истекла — войти заново один раз
+                continue
             if e.code in RETRY_STATUS and not last:
                 log.info("   %s → HTTP %s, повтор через %d с", url, e.code, RETRY_DELAYS[attempt])
                 time.sleep(RETRY_DELAYS[attempt])
@@ -491,6 +536,8 @@ def _row_matches(row: dict, f: dict) -> bool:
 
 CASE_KEYS = ["uid", "court_code", "court_name", "case_number", "legal_entity", "complex", "building", "flat",
              "contract_no", "plaintiffs", "subject", "stage", "status", "outcome", "responsible", "appeal_flag"]
+HEARING_KEYS = ["ext_uid", "date", "time", "court", "judge", "case_text", "plaintiff", "defendant", "owners", "notes",
+                "highlight"]
 DOC_KEYS = ["sha256", "filename", "mime", "kind", "act_type", "instance", "act_date", "motivated_date", "outcome",
             "track_no", "docflow_id", "storage_backend", "storage_ref", "text", "text_source"]
 
@@ -553,6 +600,13 @@ def map_row(cfg: dict, row: dict) -> dict:
         if d.get("signature_file"):
             doc["_signature"] = render(d["signature_file"], row, maps)
         out["document"] = doc
+    if "hearings" in cfg:
+        hcfg = cfg["hearings"]
+        h = {k: render(hcfg[k], row, maps) or "" for k in HEARING_KEYS if k in hcfg}
+        if not h.get("ext_uid") or not h.get("date"):
+            raise ValueError("у заседания нет ext_uid или date")
+        h["owners"] = [x.strip() for x in re.split(r"[;,]", h.get("owners", "")) if x.strip()]
+        out["hearing"] = h
     if "calendar" in cfg:
         k = cfg["calendar"]
         day = render(k["date"], row, maps)
@@ -563,7 +617,7 @@ def map_row(cfg: dict, row: dict) -> dict:
 
 
 def run_in(cfg: dict, base: Path, ld: Lawdesk | None, limit: int | None, dry: bool) -> int:
-    cases, observations, documents, uploads, calendar = [], [], [], [], {}
+    cases, observations, documents, uploads, calendar, hearings = [], [], [], [], {}, []
     # номер строки источника для каждого отправляемого элемента — чтобы ошибку сервера можно было найти в выгрузке
     case_rows, obs_rows, doc_rows = [], [], []
     problems = 0
@@ -595,6 +649,8 @@ def run_in(cfg: dict, base: Path, ld: Lawdesk | None, limit: int | None, dry: bo
             else:
                 documents.append(doc)
                 doc_rows.append(i)
+        if m.get("hearing"):
+            hearings.append(m["hearing"])
         if m.get("calendar_day"):
             day, nonworking = m["calendar_day"]
             if day and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", day):
@@ -650,6 +706,19 @@ def run_in(cfg: dict, base: Path, ld: Lawdesk | None, limit: int | None, dry: bo
         log.info("файлы: загружено %d, уже были загружены раньше %d", loaded, skipped)
     if observations:
         report("значения полей", ld.observations(observations), obs_rows)
+    if "hearings" in cfg and (hearings or cfg["hearings"].get("full_snapshot", True)):
+        if limit and cfg["hearings"].get("full_snapshot", True):
+            log.warning("заседания: при --limit снимок неполный — отправляю без пометки исчезнувших")
+        full = cfg["hearings"].get("full_snapshot", True) and not limit
+        if full and not hearings:
+            log.warning("заседания: источник вернул 0 записей — полный снимок не отправляю, чтобы не пометить все удалёнными")
+        else:
+            r = ld.request("POST", "/api/v1/ingest/hearings",
+                           {"source": cfg["hearings"].get("source_name", cfg["connector"]["name"]), "items": hearings, "full": full})
+            log.info("заседания: новых %d, изменено %d, исчезло %d; привязано к делам %d, без дела %d",
+                     r["created"], r["updated"], r["removed"], r["linked"], r["unlinked"])
+            if r["unlinked"]:
+                log.info("   заседания без дела — привяжите в рабочем месте: «Заседания» → «Без дела»")
     for year, days in sorted(calendar.items()):
         try:
             r = ld.calendar(int(year), sorted(days), cfg["calendar"].get("source_name", cfg["connector"]["name"]))
@@ -857,11 +926,12 @@ ALLOWED = {
     "source": {"type", "path", "encoding", "delimiter", "sheet", "skip_rows", "date_columns", "items_path", "pattern",
                "recursive", "url", "user", "password", "password_env", "headers", "params", "timeout", "page_size",
                "next_path", "offset_param", "limit_param", "entity", "select", "filter", "expand", "orderby", "query",
-               "url_env", "only_if", "cafile", "min_age_minutes"},
+               "url_env", "only_if", "cafile", "min_age_minutes", "login_url", "login_body"},
     "cases": set(CASE_KEYS) | {"aliases"},
     "observations": {"source", "source_ref", "fields", "send_empty", "uid", "court_code", "case_number", "case_id"},
     "documents": set(DOC_KEYS) | {"file", "signature_file", "meta", "case"},
     "calendar": {"date", "day_type", "nonworking_values", "working", "source_name"},
+    "hearings": set(HEARING_KEYS) | {"source_name", "full_snapshot"},
     "feed": {"actions", "state_file", "start_from"},
     "sink": {"type", "path", "encoding", "delimiter", "mode", "url", "method", "user", "password", "password_env",
              "headers", "timeout", "batch", "envelope", "columns", "cafile"},
@@ -905,8 +975,8 @@ def load_config(path: Path) -> dict:
         raise ConfigError("[connector] direction: in (в рабочее место) или out (наружу)")
     if direction == "in" and "source" not in cfg:
         raise ConfigError("для direction = \"in\" нужен раздел [source] — откуда брать данные")
-    if direction == "in" and not any(k in cfg for k in ("cases", "observations", "documents", "calendar")):
-        raise ConfigError("укажите, что делать с данными: раздел [cases], [observations], [documents] или [calendar]")
+    if direction == "in" and not any(k in cfg for k in ("cases", "observations", "documents", "calendar", "hearings")):
+        raise ConfigError("укажите, что делать с данными: раздел [cases], [observations], [documents], [calendar] или [hearings]")
     if direction == "out" and "sink" not in cfg:
         raise ConfigError("для direction = \"out\" нужен раздел [sink] — куда записывать")
     return cfg
@@ -955,7 +1025,7 @@ def check_templates(cfg: dict, base: Path) -> None:
         return
     log.info("колонки источника: %s", ", ".join(map(str, rows[0].keys())))
     used = []
-    for section in ("cases", "observations", "documents", "calendar"):
+    for section in ("cases", "observations", "documents", "calendar", "hearings"):
         s = cfg.get(section, {})
         for k, v in s.items():
             if k == "fields":

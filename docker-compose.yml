@@ -21,8 +21,10 @@ services:
     environment:
       LAWDESK_DATABASE_URL: postgresql+psycopg://lawdesk:${POSTGRES_PASSWORD}@db:5432/lawdesk
       LAWDESK_COOKIE_SECURE: "true"
+      LAWDESK_BACKUP_STATUS_FILE: /backups/status.json   # итог последней копии — для страницы администратора
     volumes:
       - storage:/data/storage   # локальное хранилище файлов, пока не подключён 1С:Документооборот
+      - backups:/backups:ro     # резервные копии: сервер только читает status.json
       - ./backend/fields.toml:/app/fields.toml:ro       # справочник полей: правка + docker compose restart backend
       - ./backend/settings.toml:/app/settings.toml:ro   # настройки: правка + docker compose restart backend
     healthcheck:   # /api/health отвечает 503, если недоступна база
@@ -45,6 +47,27 @@ services:
     depends_on:
       - backend
 
+  # Резервные копии: каждый день в BACKUP_TIME — дамп базы + архив файлов документов, проверка
+  # восстановления, прореживание старых. Копии — в томе backups (docs/администрирование.md, раздел 4).
+  # Том лежит на этом же сервере: копии нужно дополнительно увозить на другой сервер (пример rsync — там же).
+  # Сделать копию сейчас: docker compose exec backup backup.sh now
+  backup:
+    build: ./backup
+    restart: unless-stopped
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?задайте POSTGRES_PASSWORD в .env}
+      PGPASSWORD: ${POSTGRES_PASSWORD}   # чтобы psql/pg_restore работали и при ручном запуске (восстановление)
+      TZ: Europe/Moscow
+      BACKUP_TIME: "02:30"          # когда делать копию
+      BACKUP_MIN_FREE_MB: "2048"    # меньше свободного места — копия не делается (ошибка в админке)
+    volumes:
+      - backups:/backups
+      - storage:/data/storage:ro
+    depends_on:
+      db:
+        condition: service_healthy
+
 volumes:
   pgdata:
   storage:
+  backups:
