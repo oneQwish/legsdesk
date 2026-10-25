@@ -103,6 +103,7 @@ def test_csv_example_maps_rows():
 def test_xlsx_json_folder_calendar_examples():
     for name in ("xlsx", "json", "папка_документов", "календарь_csv"):
         cfg = lc.load_config(EXAMPLES / f"{name}.toml")
+        cfg["source"]["min_age_minutes"] = 0  # в свежем клоне все файлы «только что изменены»
         lc.check_templates(cfg, EXAMPLES)
         rows = list(lc.read_rows(cfg["source"], EXAMPLES))
         assert rows, name
