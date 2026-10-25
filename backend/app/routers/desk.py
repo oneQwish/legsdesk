@@ -104,3 +104,31 @@ def my_progress(db: Session = Depends(get_db), who: Principal = Depends(require(
             db.scalar(select(func.min(cast(Event.ts, Date)))) or (user.last_login.date() if user and user.last_login else today))
         streak = max(0, (today - since).days)
     return {"metrics": metrics, "streak": streak, "overdue_now": overdue_now, "scope": "мои дела" if scope_mine else "все дела"}
+
+
+@router.get("/piles")
+def piles(size: int | None = Query(None, ge=1, le=200), db: Session = Depends(get_db),
+          who: Principal = Depends(require(role="viewer"))):
+    """Все стандартные стопки «Стола» одним запросом (раньше — шесть): горят сроки, на неделю, конфликты,
+    мои дела, без УИД, недавно изменённые. Пороги — [interface] desk_hot_days / desk_week_days."""
+    from .cases import list_cases
+
+    s = get_settings()
+    n = size or s.desk_pile_size
+    today = clock.today()
+    hot_to, week_to = today + timedelta(days=s.desk_hot_days), today + timedelta(days=s.desk_week_days)
+
+    def pile(sort: str, **kw):
+        page = list_cases(f=CaseFilter(**kw), sort=sort, page=1, size=n, db=db, _=who)
+        return {"items": [i.model_dump(mode="json") for i in page.items], "total": page.total}
+
+    week = pile("next_due", due_to=week_to)
+    week_items = [i for i in week["items"] if i["next_due"] and i["next_due"] > hot_to.isoformat()]
+    return {
+        "hot": pile("next_due", due_to=hot_to),
+        "week": {"items": week_items, "total": len(week_items)},
+        "conflicts": pile("-conflicts", has_conflicts=True),
+        "mine": pile("next_due", responsible=[who.name]),
+        "no_uid": pile("-updated_at", has_uid=False),
+        "recent": pile("-updated_at"),
+    }

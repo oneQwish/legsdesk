@@ -307,3 +307,10 @@ def test_desk_strip_progress_and_amounts(svc, lawyer):
     lawyer.post(f"/api/v1/values/{pen['id']}/resolve", json={"observation_id": pen["observations"][0]["id"]})
     m = lawyer.get("/api/v1/desk/progress").json()["metrics"]
     assert m["deadlines"]["this_week"] == 1 and m["conflicts"]["this_week"] == 1
+
+
+def test_desk_piles_one_request(svc, lawyer):
+    cid = ingest_case(svc, responsible="lawyer1")
+    r = lawyer.get("/api/v1/desk/piles").json()
+    assert set(r) == {"hot", "week", "conflicts", "mine", "no_uid", "recent"}
+    assert r["mine"]["total"] == 1 and r["mine"]["items"][0]["id"] == cid and r["recent"]["total"] == 1

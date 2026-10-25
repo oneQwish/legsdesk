@@ -1,35 +1,23 @@
-import { useMemo } from "react";
 import { Link } from "react-router-dom";
 import { Topbar, useSession } from "../App";
-import { api, cachedApi, invalidateCache, localISO, qs, settings, type CaseBrief, type Page } from "../api";
+import { api, cachedApi, invalidateCache, settings, type CaseBrief, type Page } from "../api";
 import { VIEW_COLORS, type SavedView } from "../components/FilterPanel";
 import Pile from "../components/Pile";
 import DayStrip from "../components/DayStrip";
 import { CleanDesk, WeekProgress } from "../components/Progress";
 import { useAction, useLoad } from "../components/ui";
 
-const plus = (days: number) => {
-  const d = new Date();
-  d.setDate(d.getDate() + days);
-  return localISO(d);
-};
 
-function usePile(params: Record<string, string | number | boolean | undefined>, filter?: (c: CaseBrief) => boolean) {
-  const r = useLoad(() => api<Page<CaseBrief>>(`/cases${qs({ size: settings.desk_pile_size, ...params })}`), [JSON.stringify(params)]);
-  // один и тот же массив, пока не пришли новые данные, — иначе стопка сбрасывала бы позицию на каждую перерисовку
-  const items = useMemo(() => (r.data?.items ?? []).filter(filter ?? (() => true)), [r.data]); // eslint-disable-line react-hooks/exhaustive-deps
-  return { items, total: filter ? items.length : r.data?.total ?? 0, loading: r.loading };
-}
+const EMPTY: CaseBrief[] = [];
+type PileData = { items: CaseBrief[]; total: number };
+type Piles = Record<"hot" | "week" | "conflicts" | "mine" | "no_uid" | "recent", PileData>;
 
 export default function DeskPage() {
   const { me, stats } = useSession();
-  const hot = usePile({ due_before: plus(settings.desk_hot_days), sort: "next_due" });
-  const week = usePile({ due_before: plus(settings.desk_week_days), sort: "next_due" },
-                       (c) => !!c.next_due && c.next_due > plus(settings.desk_hot_days));
-  const conflicts = usePile({ has_conflicts: true, sort: "-conflicts" });
-  const mine = usePile({ responsible: me.login, sort: "next_due" });
-  const noUid = usePile({ has_uid: false, sort: "-updated_at" });
-  const recent = usePile({ sort: "-updated_at" });
+  // все стандартные стопки — одним запросом (пороги и размер — из настроек сервера)
+  const piles = useLoad(() => api<Piles>("/desk/piles"), []);
+  const pile = (k: keyof Piles) => ({ items: piles.data?.[k].items ?? EMPTY, total: piles.data?.[k].total ?? 0, loading: piles.loading });
+  const hot = pile("hot"), week = pile("week"), conflicts = pile("conflicts"), mine = pile("mine"), noUid = pile("no_uid"), recent = pile("recent");
   const views = useLoad(() => cachedApi<SavedView[]>("/views"), []);
   const { run } = useAction();
   const removeFromDesk = (v: SavedView) => run(async () => {
